@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self';" />
+    <title>Assets</title>
+    <link rel="stylesheet" href="sidebar.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand">
+        <span class="logo">H3D</span>
+        <div class="brand-text">
+          <strong>Asset Manager</strong>
+          <span id="subtitle">Hunyuan3D</span>
+        </div>
+      </div>
+      <button id="collapse" class="icon-btn" title="Collapse sidebar (Ctrl+B)">&#x276F;</button>
+    </header>
+    <button id="expand" class="rail-btn" title="Expand sidebar (Ctrl+B)">&#x276E;</button>
+    <div class="grip" id="grip" title="Drag to resize"></div>
+
+    <section class="wsbar" id="wsbar">
+      <label class="ws-label" for="ws-select">Workspace</label>
+      <select id="ws-select" title="Active workspace — new downloads save here"></select>
+      <button id="ws-add" class="icon-btn" title="New workspace">+</button>
+      <button id="ws-menu-btn" class="icon-btn" title="Workspace options">&#x22EF;&#x2022;&#x2022;</button>
+    </section>
+
+    <section class="stats" id="stats">
+      <div class="stat"><b id="stat-total">0</b><span>Assets</span></div>
+      <div class="stat"><b id="stat-models">0</b><span>Models</span></div>
+      <div class="stat"><b id="stat-codes">0</b><span>Scripts</span></div>
+      <div class="stat"><b id="stat-size">0 B</b><span>On disk</span></div>
+    </section>
+
+    <section class="toolbar">
+      <input id="search" type="search" placeholder="Filter assets…" />
+      <select id="kind">
+        <option value="all">All</option>
+        <option value="model">Models</option>
+        <option value="blender-code">Blender code</option>
+        <option value="other">Other</option>
+      </select>
+      <button id="scan" class="btn" title="Scan Downloads folder for models">Scan</button>
+    </section>
+
+    <main class="list" id="list"></main>
+
+    <footer class="foot">
+      <span id="status">Ready</span>
+      <button id="refresh" class="btn ghost">Refresh</button>
+    </footer>
+
+    <div class="modal-backdrop" id="ws-modal" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ws-modal-title">
+        <h3 id="ws-modal-title">Workspace</h3>
+        <label class="field">
+          <span>Name</span>
+          <input id="ws-name" type="text" placeholder="e.g. Chair redesign" />
+        </label>
+        <label class="field">
+          <span>Folder</span>
+          <div class="field-row">
+            <input id="ws-folder" type="text" placeholder="(downloads go here)" readonly />
+            <button id="ws-browse" class="btn">Browse…</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>Notes</span>
+          <textarea id="ws-notes" rows="3" placeholder="Optional notes about this project"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button id="ws-delete" class="btn danger">Delete</button>
+          <span class="spacer"></span>
+          <button id="ws-cancel" class="btn ghost">Cancel</button>
+          <button id="ws-save" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="sidebar.js"></script>
+  </body>
+</html>
