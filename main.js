@@ -10,15 +10,27 @@
  *    that share the same session; anything else opens in the system browser.
  *  - Auto-saves downloaded models (GLB/OBJ) into the Downloads folder
  *    and shows a notification when done.
+ *  - Optional MeshCoder step (Tools menu): converts the last downloaded
+ *    mesh into part-segmented, editable Blender Python code using a local
+ *    MeshCoder install on your GPU. See meshcoder.js + the README.
  *
  * What it does NOT do:
- *  - No automation, no page scripting, no generation-driving.
+ *  - No automation of the web app, no page scripting, no generation-driving.
  *    You click things yourself, same as in a browser — just without
  *    having to switch windows or re-log-in every time.
  */
-const { app, BrowserWindow, session, Menu, shell, Notification } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  session,
+  Menu,
+  shell,
+  Notification,
+  dialog,
+} = require('electron');
 const path = require('path');
 const fs = require('fs');
+const meshcoder = require('./meshcoder');
 
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
 const APP_TITLE = 'Hunyuan3D';
@@ -27,6 +39,9 @@ const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 
 // Domains that belong to the login/app flow and should stay in-app.
 const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'gtimg.com', 'qpic.cn'];
+
+let lastDownloadPath = null;
+let converting = false;
 
 function isInApp(url) {
   try {
@@ -78,6 +93,7 @@ function createMainWindow() {
     item.setSavePath(target);
     item.once('done', (_e, state) => {
       if (state === 'completed') {
+        lastDownloadPath = target;
         new Notification({ title: 'Hunyuan3D', body: `Saved: ${path.basename(target)}` }).show();
       }
     });
@@ -102,9 +118,67 @@ function createMainWindow() {
   return win;
 }
 
+function focusedWindow() {
+  return BrowserWindow.getFocusedWindow();
+}
+
 function focusedWebContents() {
-  const w = BrowserWindow.getFocusedWindow();
+  const w = focusedWindow();
   return w ? w.webContents : null;
+}
+
+async function convertLastDownload() {
+  const win = focusedWindow();
+  if (converting) return;
+  if (!lastDownloadPath) {
+    await dialog.showMessageBox(win, {
+      type: 'info',
+      message: 'Nothing to convert yet',
+      detail: 'Generate and download a model first — MeshCoder converts the most recent download.',
+    });
+    return;
+  }
+  if (!meshcoder.isConfigured()) {
+    await dialog.showMessageBox(win, {
+      type: 'warning',
+      message: 'MeshCoder is not configured',
+      detail:
+        'Point the app at your local MeshCoder install via Tools → Open MeshCoder config ' +
+        '(set "home" and "python"), or the MESHCODER_HOME / MESHCODER_PYTHON env vars. ' +
+        'See the MeshCoder section of the README for the full setup.',
+    });
+    return;
+  }
+  converting = true;
+  new Notification({
+    title: 'Hunyuan3D',
+    body: `MeshCoder: converting ${path.basename(lastDownloadPath)}…`,
+  }).show();
+  try {
+    const codePath = await meshcoder.convertToCode(lastDownloadPath);
+    new Notification({ title: 'Hunyuan3D', body: `Blender code saved: ${path.basename(codePath)}` }).show();
+    shell.showItemInFolder(codePath);
+  } catch (err) {
+    await dialog.showMessageBox(win, {
+      type: 'error',
+      message: 'MeshCoder conversion failed',
+      detail: String(err && err.message ? err.message : err),
+    });
+  } finally {
+    converting = false;
+  }
+}
+
+async function openMeshcoderConfig() {
+  const file = meshcoder.configPath();
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ home: '', python: '', _note: 'home = MeshCoder clone path, python = its conda env python.exe' }, null, 2)
+    );
+  }
+  await shell.openPath(file);
 }
 
 function buildMenu() {
@@ -139,6 +213,16 @@ function buildMenu() {
         { label: 'Reload', accelerator: 'Ctrl+R', click: () => focusedWebContents()?.reload() },
         { type: 'separator' },
         { label: 'Toggle DevTools', accelerator: 'Ctrl+Shift+I', click: () => focusedWebContents()?.toggleDevTools() },
+      ],
+    },
+    {
+      label: 'Tools',
+      submenu: [
+        {
+          label: 'Convert last download to Blender code (MeshCoder)',
+          click: () => convertLastDownload(),
+        },
+        { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
       ],
     },
   ];
