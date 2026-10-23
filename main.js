@@ -117,24 +117,37 @@ const TRANSLATE_SNIPPET = `
   document.documentElement.appendChild(holder);
   var style = document.createElement('style');
   style.textContent =
-    '.goog-te-banner-frame,.goog-te-balloon-frame,#goog-gt-tt{display:none!important;visibility:hidden!important}' +
+    '.goog-te-banner-frame,.goog-te-balloon-frame,#goog-gt-tt,' +
+    'iframe.skiptranslate,[class*="VIpgJd-ZVi9od-ORHb"]' +
+    '{display:none!important;visibility:hidden!important;height:0!important}' +
     'body{top:0!important}';
   document.documentElement.appendChild(style);
-  // The widget re-inserts its banner (with inline styles that beat a plain
-  // stylesheet) whenever translation state changes — so also stamp inline
-  // !important hiding on any banner that appears, and keep the page
-  // from being pushed down.
-  new MutationObserver(function () {
+  // The widget keeps re-inserting its banner under changing class names
+  // and with inline styles that beat a plain stylesheet — so sweep for
+  // every known banner variant and stamp inline !important hiding on
+  // sight, and keep the page from being pushed down. The sweeper runs on
+  // DOM mutations AND on a timer, because the banner can also appear
+  // long after load (first translation, panel switches).
+  function hideTranslateChrome() {
     document
-      .querySelectorAll('.goog-te-banner-frame,.goog-te-balloon-frame')
+      .querySelectorAll(
+        '.goog-te-banner-frame,.goog-te-balloon-frame,iframe.skiptranslate,' +
+          '[class*="VIpgJd-ZVi9od-ORHb"]'
+      )
       .forEach(function (el) {
         el.style.setProperty('display', 'none', 'important');
         el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('height', '0', 'important');
       });
     if (document.body && document.body.style.top && document.body.style.top !== '0px') {
       document.body.style.setProperty('top', '0px', 'important');
     }
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  new MutationObserver(hideTranslateChrome).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  setInterval(hideTranslateChrome, 1000);
   var s = document.createElement('script');
   s.id = 'hy3d-gt-script';
   s.src = 'https://translate.google.com/translate_a/element.js?cb=__hy3dTranslateInit';
