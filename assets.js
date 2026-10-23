@@ -66,6 +66,7 @@ function describe(filePath, existing) {
     createdAt: existing ? existing.createdAt : Date.now(),
     updatedAt: mtime,
     meshId: existing ? existing.meshId : null,
+    compound: existing ? Boolean(existing.compound) : false,
     workspaceId: existing && existing.workspaceId !== undefined ? existing.workspaceId : null,
   };
 }
@@ -173,6 +174,19 @@ function remove(id) {
   writeStore(assets.filter((a) => a.id !== id));
 }
 
+/** Update arbitrary fields on a tracked asset. */
+function patch(id, fields) {
+  const assets = readStore();
+  let updated = null;
+  const next = assets.map((a) => {
+    if (a.id !== id) return a;
+    updated = { ...a, ...fields, updatedAt: Date.now() };
+    return updated;
+  });
+  writeStore(next);
+  return updated;
+}
+
 function find(id) {
   return readStore().find((a) => a.id === id) || null;
 }
@@ -239,6 +253,7 @@ module.exports = {
   track,
   linkCode,
   assign,
+  patch,
   remove,
   find,
   findByPath,
