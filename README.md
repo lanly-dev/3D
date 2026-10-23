@@ -1,73 +1,83 @@
 # Hunyuan3D Desktop
 
-A personal desktop wrapper for the Hunyuan3D web app (`https://3d.hunyuan.tencent.com/`).
-
-## Why
-
-The site's login session dies constantly in a VS Code webview (webviews don't
-persist cookies and extensions can't save/restore them). This app keeps the
-session alive with a persistent Chromium profile, the same way Chrome does.
+A small desktop wrapper around the Hunyuan3D web app
+(`https://3d.hunyuan.tencent.com/`), with a local asset sidebar.
 
 ## What it does
 
-- Loads the Hunyuan3D web app in its own window.
-- Persists cookies/localStorage across restarts (session partition
-  `persist:hunyuan3d`) — log in once, stay logged in until Tencent expires
-  the session server-side.
-- Login popups (QQ/WeChat) open in in-app windows sharing the session;
-  other external links open in your system browser.
-- Model downloads (GLB/OBJ) auto-save to your Downloads folder with a
-  completion notification.
-- Menu: **Navigate** (Back / Forward / Reload / DevTools),
-  **Hunyuan3D → Home**, and **Clear session & restart** for when a login
-  gets wedged.
-- Menu option **Hunyuan3D → Translate site to English**: the site ships
+- Loads the site in a real Chromium shell and keeps the login session alive
+  across restarts (persistent partition `persist:hunyuan3d`).
+- Login popups open in-app; other external links open in the system browser.
+- Downloads (GLB/OBJ) auto-save into the active workspace folder.
+- **Translate site to English** (Hunyuan3D menu) — the site ships
   Chinese-first, so this restarts the app asking for English (en-US locale
   + `Accept-Language`) and machine-translates whatever still renders in
-  Chinese, in place, via Google Translate's widget. It's machine
-  translation — good enough for buttons and labels, occasionally odd for
-  longer text. Toggle it off and the app restarts back to normal.
+  Chinese, in place, via Google Translate's widget.
+- **Workspaces** — named folders that own a project and its assets.
+- **Asset sidebar** — an index of tracked models and generated scripts, with
+  filters, per-asset actions, and a workspace scope.
+- **MeshCoder** (optional) — converts a mesh into part-segmented, editable
+  Blender Python code using a local MeshCoder install.
+- **Compounding engine** — accumulates the parts produced by every conversion
+  into a reusable library, and can compound a workspace into a single Blender
+  scene script that re-uses earlier work instead of regenerating it.
 
-It does not automate anything — no page scripting, no auto-clicking. You use
-the site yourself; the app just stops it from forgetting you.
+It does not automate the site — no page scripting, no auto-clicking.
 
-## MeshCoder: mesh → editable Blender code (optional)
+## Compounding engine
 
-[MeshCoder](https://github.com/InternRobotics/MeshCoder) (MIT) converts a
-point cloud into a **part-segmented Blender Python script** — a generated
-mesh stops being a fused blob and becomes code you can edit, repose, and
-split into parts. The app wires it in as one extra step:
+Every MeshCoder conversion is harvested for part names and added to a
+persistent library (`<userData>/compounding.json`). The sidebar shows the
+accumulated parts; **Compound build** writes `<workspace>.compound.py`, a
+Blender 4.x script that imports the tracked meshes and re-executes the
+previously generated scripts, so each build accumulates on the last.
 
-1. Download a model in the app as usual.
-2. **Tools → Convert last download to Blender code (MeshCoder).**
-3. The app samples the mesh into a point cloud (`mesh-to-npz.py`), runs
-   MeshCoder's inference on your GPU, and saves `<model name>.blender.py`
-   next to the download. Run that script inside Blender 4.x to rebuild the
-   model as editable parts.
+- **Menu** — *Tools → Compound active workspace*, *Tools → Reveal compounding store*.
+- **Sidebar** — the *Compounding engine* panel, with **Compound build** and
+  **Store** buttons.
 
-### One-time setup (on the Windows machine)
+Compound scripts are excluded from later builds' reuse chain, so the chain
+stays bounded.
 
-MeshCoder runs in its own Python env — it does not run inside Electron.
+## Workspaces
 
-1. Clone MeshCoder and create its conda env per its README — Python 3.10,
-   PyTorch 2.4.1 + CUDA 11.8. (Tested upstream on Linux; on Windows expect
-   some dependency friction — WSL2 is the smoother path if conda fights you.)
-2. Download the checkpoints from Hugging Face and place them:
-   - shape tokenizer + LoRA files → `MeshCoder/llama-3-models/object_to_code_model/`
-   - base model → `MeshCoder/llama-3-models/Llama3.2-1B/`
-3. Point the app at it: **Tools → Open MeshCoder config** and set
-   `"home"` (the clone path) and `"python"` (the env's python) — or set the
-   `MESHCODER_HOME` / `MESHCODER_PYTHON` environment variables.
+A workspace is a named project that owns a folder. The active one decides
+where downloads and generated code are written. Manage them from the sidebar
+dropdown, the **+** / **⋯** buttons, or **Menu → Workspaces**. Stored in
+`<userData>/workspaces.json`.
 
-### Honest limits
+## Where the data lives
 
-MeshCoder was trained on human-made objects (Infinigen). AI-generated
-meshes — Hunyuan3D's included — are out-of-distribution, and its authors
-say the same about TRELLIS outputs: expect approximate reconstructions,
-better on some parts than others. Convert **one part at a time** (a limb,
-a torso) rather than a whole fused character for the best results.
+| File | Contents |
+| --- | --- |
+| `<userData>/assets.json` | Asset index |
+| `<userData>/workspaces.json` | Workspaces + active one |
+| `<userData>/compounding.json` | Part library + build history |
+| `<userData>/layout.json` | Sidebar width + visibility |
 
-## Run (dev)
+**View → Reveal asset store** opens the folder. Untracking an asset never
+touches the file on disk.
+
+## MeshCoder setup (optional)
+
+MeshCoder runs in its own Python env (needs a CUDA GPU) — it does not run
+inside Electron.
+
+1. Clone MeshCoder and create its conda env per its README (Python 3.10,
+   PyTorch 2.4.1 + CUDA 11.8). WSL2 is the smoother path on Windows.
+2. Download the checkpoints into `MeshCoder/llama-3-models/`:
+   `Llama3.2-1B/` (base model) and `object_to_code_model/` (tokenizer + LoRA).
+3. Point the app at it via **Tools → Open MeshCoder config** (`home`, `python`)
+   or the `MESHCODER_HOME` / `MESHCODER_PYTHON` env vars.
+
+Then use **Tools → Convert last download to Blender code**, or the **To
+Blender** button on a mesh row.
+
+MeshCoder was trained on human-made objects, so AI-generated meshes are
+out-of-distribution — expect approximate results, and convert one part at a
+time (a limb, a torso) rather than a whole fused character.
+
+## Run
 
 ```sh
 npm install
@@ -80,6 +90,5 @@ npm start
 npm run package-win
 ```
 
-Output: `dist/Hunyuan3D-win32-x64/`. Zip it and move it to the Windows
-machine. The build is unsigned — on first launch SmartScreen will say
-"Windows protected your PC"; click **More info → Run anyway**.
+Output: `dist/Hunyuan3D-win32-x64/`. The build is unsigned — on first launch
+SmartScreen will warn; click **More info → Run anyway**.

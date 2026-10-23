@@ -1,1 +1,11 @@
-{"description":"Personal desktop wrapper for the Hunyuan3D web app with a persistent login session","devDependencies":{"electron":"^44.7.2","electron-packager":"^17.1.2"},"license":"ISC","main":"main.js","name":"hunyuan3d-desktop","scripts":{"package-win":"electron-packager . \"Hunyuan3D\" --platform=win32 --arch=x64 --out=dist --overwrite","start":"electron ."},"version":"0.1.0"}
+{
+    "main": "main.js",
+    "scripts": {
+        "package-win": "electron-packager . \"Hunyuan3D\" --platform=win32 --arch=x64 --out=dist --overwrite",
+        "start": "electron ."
+    },
+    "devDependencies": {
+        "electron": "^44.7.2",
+        "electron-packager": "^17.1.2"
+    }
+}
