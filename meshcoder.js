@@ -80,12 +80,9 @@ function run(cmd, args, opts = {}) {
 
 /**
  * Convert a mesh file to Blender Python code via MeshCoder.
- *
  * Writes `<mesh name>.blender.py` next to the mesh and resolves with its path.
- * If `outDir` is given, the script is written there instead (used by the
- * active workspace so generated code lands in the project folder).
  */
-async function convertToCode(meshPath, outDir) {
+async function convertToCode(meshPath) {
   const cfg = loadConfig();
   if (!isConfigured(cfg)) {
     throw new Error(
@@ -93,13 +90,8 @@ async function convertToCode(meshPath, outDir) {
         `or edit ${configPath()} — see the MeshCoder section of the README.`
     );
   }
+  const dir = path.dirname(meshPath);
   const base = path.basename(meshPath, path.extname(meshPath));
-  const dir = outDir ? path.resolve(outDir) : path.dirname(meshPath);
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch {
-    throw new Error(`Cannot create output folder: ${dir}`);
-  }
   const codePath = path.join(dir, `${base}.blender.py`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meshcoder-'));
   const npzPath = path.join(tmp, 'points.npz');
