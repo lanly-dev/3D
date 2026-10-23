@@ -117,9 +117,24 @@ const TRANSLATE_SNIPPET = `
   document.documentElement.appendChild(holder);
   var style = document.createElement('style');
   style.textContent =
-    '.goog-te-banner-frame{display:none!important}' +
+    '.goog-te-banner-frame,.goog-te-balloon-frame,#goog-gt-tt{display:none!important;visibility:hidden!important}' +
     'body{top:0!important}';
   document.documentElement.appendChild(style);
+  // The widget re-inserts its banner (with inline styles that beat a plain
+  // stylesheet) whenever translation state changes — so also stamp inline
+  // !important hiding on any banner that appears, and keep the page
+  // from being pushed down.
+  new MutationObserver(function () {
+    document
+      .querySelectorAll('.goog-te-banner-frame,.goog-te-balloon-frame')
+      .forEach(function (el) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+      });
+    if (document.body && document.body.style.top && document.body.style.top !== '0px') {
+      document.body.style.setProperty('top', '0px', 'important');
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
   var s = document.createElement('script');
   s.id = 'hy3d-gt-script';
   s.src = 'https://translate.google.com/translate_a/element.js?cb=__hy3dTranslateInit';
