@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Convert a mesh file (GLB/OBJ/PLY/STL) into the NPZ point-cloud format
-MeshCoder expects: keys 'points' and 'normals', points normalized to [-1, 1].
+MeshCoder expects: keys 'points' and 'normals', each shaped (1, N, 3) —
+a batch of one point cloud, normalized to [-1, 1]. The leading axis
+matters: llama_recipes' GeneralNpzDataset treats axis 0 as the sample
+axis, so an unbatched (N, 3) array reads as N one-point "shapes" and
+inference dies concatenating features along a missing dimension.
 
 Usage:
-    python mesh-to-npz.py input.glb output.npz [--samples 8192]
+    python mesh-to-npz.py input.glb output.npz [--samples 16384]
 
-Requires: trimesh, numpy (both already in the MeshCoder conda env).
+Requires: trimesh, numpy (both already in the MeshCoder env).
 """
 import argparse
 import sys
@@ -36,7 +40,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
     ap.add_argument("output")
-    ap.add_argument("--samples", type=int, default=8192)
+    ap.add_argument("--samples", type=int, default=16384)
     args = ap.parse_args()
 
     mesh, sample_surface = load_geometry(args.input)
@@ -52,10 +56,12 @@ def main():
         return 1
     points /= extent  # now within [-1, 1]
 
+    # Batch of one: (1, N, 3). See the module docstring — the dataset
+    # loader indexes axis 0 per shape.
     np.savez(
         args.output,
-        points=points.astype(np.float32),
-        normals=np.asarray(normals, dtype=np.float32),
+        points=points.astype(np.float32)[None, :, :],
+        normals=np.asarray(normals, dtype=np.float32)[None, :, :],
     )
     print(f"wrote {args.output}: {len(points)} points")
     return 0
