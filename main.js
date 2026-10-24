@@ -780,7 +780,43 @@ function createMainWindow() {
   // the views keep their pre-menu bounds and the sidebar footer sits
   // below the visible area until the user resizes the window.
   layoutViews();
+  // ...but that shrink lands asynchronously (measured: still pre-menu
+  // height 100ms after setApplicationMenu, shrunk by 600ms), so a single
+  // re-layout is not enough. Keep re-laying out until the size stops
+  // changing (see settleLayout).
+  settleLayout();
   return win;
+}
+
+/**
+ * Re-run layoutViews until the window's content bounds stop changing.
+ * Covers anything that resizes the content area asynchronously after
+ * startup without a resize event (the menu bar is the known case). Polls
+ * every 100ms and stops after 500ms of stability, or after 5s at most —
+ * it never runs past startup.
+ */
+function settleLayout() {
+  const win = mainWindow;
+  if (!win) return;
+  let lastW = -1;
+  let lastH = -1;
+  let stablePolls = 0;
+  const timer = setInterval(() => {
+    if (win.isDestroyed() || win !== mainWindow) {
+      clearInterval(timer);
+      return;
+    }
+    const { width: w, height: h } = win.getContentBounds();
+    if (w !== lastW || h !== lastH) {
+      lastW = w;
+      lastH = h;
+      stablePolls = 0;
+      layoutViews();
+    } else if (++stablePolls >= 5) {
+      clearInterval(timer);
+    }
+  }, 100);
+  setTimeout(() => clearInterval(timer), 5000);
 }
 
 /** Position the nav bar, sidebar and site view inside the window. */
