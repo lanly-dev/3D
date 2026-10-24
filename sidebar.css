@@ -107,22 +107,17 @@ body.collapsed .grip { width: 4px; }
 
 /* ---------- stats ---------- */
 .stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.stat {
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 9px 11px;
-  display: flex;
-  flex-direction: column;
-}
-.stat b { font-size: 17px; font-weight: 650; }
-.stat span { color: var(--fg-dim); font-size: 11px; }
+.stat { display: flex; align-items: center; gap: 5px; white-space: nowrap; min-width: 0; }
+.stat-ico { font-size: 12px; line-height: 1; }
+.stat b { font-size: 13px; font-weight: 650; }
 
 /* ---------- toolbar ---------- */
 .toolbar {
