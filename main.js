@@ -1723,6 +1723,8 @@ function registerIpc() {
     const found = assets.find(String(id || ''));
     if (!found) return false;
     const menu = Menu.buildFromTemplate([
+      { label: 'Show in Explorer', click: () => shell.showItemInFolder(found.filePath) },
+      { type: 'separator' },
       { label: 'Delete file', click: () => deleteAssetFile(found.id) },
       {
         label: 'Remove from list',
