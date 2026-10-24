@@ -932,15 +932,19 @@ async function convertLastDownload() {
     return;
   }
   if (!meshcoder.isConfigured()) {
-    await dialog.showMessageBox(win, {
-      type: 'warning',
-      message: 'MeshCoder is not configured',
-      detail:
-        'Point the app at your local MeshCoder install via Tools → Open MeshCoder config ' +
-        '(set "home" and "python"), or the MESHCODER_HOME / MESHCODER_PYTHON env vars. ' +
-        'See the MeshCoder section of the README for the full setup.',
-    });
-    return;
+    const detected = meshcoder.detectAndSave();
+    if (!meshcoder.isConfigured(detected.cfg)) {
+      await dialog.showMessageBox(win, {
+        type: 'warning',
+        message: 'MeshCoder is not configured',
+        detail:
+          'Auto-detection looked in the usual clone folders and conda envs and found nothing. ' +
+          'Point the app at your local MeshCoder install via Tools → Open MeshCoder config ' +
+          '(set "home" and "python"), or the MESHCODER_HOME / MESHCODER_PYTHON env vars. ' +
+          'See the MeshCoder section of the README for the full setup.',
+      });
+      return;
+    }
   }
   converting = true;
   new Notification({
@@ -1017,6 +1021,19 @@ async function openMeshcoderConfig() {
     );
   }
   await shell.openPath(file);
+}
+
+async function detectMeshcoder() {
+  const win = focusedWindow();
+  const { cfg, newly } = meshcoder.detectAndSave();
+  const configured = meshcoder.isConfigured(cfg);
+  await dialog.showMessageBox(win, {
+    type: configured ? 'info' : 'warning',
+    message: configured ? 'MeshCoder detected' : 'MeshCoder not found',
+    detail: configured
+      ? `Home: ${cfg.home}${newly.home ? ' (auto-detected)' : ''}\nPython: ${cfg.python}${newly.python ? ' (auto-detected)' : ''}\n\nSaved to ${meshcoder.configPath()}.`
+      : 'Auto-detection looked in the usual clone folders (~/MeshCoder, ~/Documents/GitHub, ~/source/repos), conda envs, and PATH pythons with torch + trimesh, and found nothing. Set it via Tools → Open MeshCoder config or the MESHCODER_HOME / MESHCODER_PYTHON env vars.',
+  });
 }
 
 /**
@@ -1184,6 +1201,7 @@ function buildMenu() {
           click: () => convertLastDownload(),
         },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
+        { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { type: 'separator' },
         {
           label: 'Compound active workspace',
@@ -1318,7 +1336,10 @@ function registerIpc() {
     const asset = assets.findByPath(found.filePath) || found;
     if (converting) return { message: 'A conversion is already running' };
     if (!meshcoder.isConfigured()) {
-      return { message: 'MeshCoder is not configured — see Tools → Open MeshCoder config' };
+      const detected = meshcoder.detectAndSave();
+      if (!meshcoder.isConfigured(detected.cfg)) {
+        return { message: 'MeshCoder is not configured and auto-detection found nothing — see Tools → Detect MeshCoder automatically' };
+      }
     }
     converting = true;
     notifySidebar();

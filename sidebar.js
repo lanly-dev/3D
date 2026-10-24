@@ -65,7 +65,11 @@ function formatDate(ts) {
 }
 
 function setStatus(text) {
+  // The visible line truncates with an ellipsis, so the tooltip carries
+  // the whole message. (The transient 'Copied' flash writes textContent
+  // directly and leaves the title on the real message.)
   $('status').textContent = text;
+  $('status').title = text;
 }
 
 /**

@@ -85,7 +85,10 @@ inside Electron.
 2. Download the checkpoints into `MeshCoder/llama-3-models/`:
    `Llama3.2-1B/` (base model) and `object_to_code_model/` (tokenizer + LoRA).
 3. Point the app at it via **Tools → Open MeshCoder config** (`home`, `python`)
-   or the `MESHCODER_HOME` / `MESHCODER_PYTHON` env vars.
+   or the `MESHCODER_HOME` / `MESHCODER_PYTHON` env vars. Step 3 is usually
+   unnecessary: **Tools → Detect MeshCoder automatically** (and every
+   conversion attempt) finds a clone in the usual folders and a conda env
+   with torch + trimesh, and saves them to the config.
 
 Then use **Tools → Convert last download to Blender code**, or the **To
 Blender** button on a mesh row.

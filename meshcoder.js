@@ -14,13 +14,20 @@
  *   MESHCODER_HOME    path to the MeshCoder clone
  *   MESHCODER_PYTHON  python executable of the MeshCoder conda env
  *
+ * Anything the env vars / config file leave blank is auto-detected when
+ * it is needed (first conversion, or Tools -> Detect MeshCoder
+ * automatically): a clone is recognized by its inference entry script in
+ * the usual folders, and a python by torch + trimesh in its site-packages.
+ * Detection only fills gaps — an explicitly set value always wins — and a
+ * successful detection is saved to meshcoder.json so it runs once.
+ *
  * Expected layout under MESHCODER_HOME (per MeshCoder's README):
  *   llama-3-models/Llama3.2-1B/           base model
  *   llama-3-models/object_to_code_model/  shape tokenizer + LoRA checkpoint
  *   recipes/inference/local_inference/custom_inference/inference_shape2code_point_input.py
  */
 const { app } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -56,6 +63,211 @@ function isConfigured(cfg = loadConfig()) {
   );
 }
 
+function saveConfig(cfg) {
+  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
+  fs.writeFileSync(
+    configPath(),
+    JSON.stringify({ home: cfg.home || '', python: cfg.python || '' }, null, 2)
+  );
+}
+
+/** Folders a MeshCoder clone commonly lives in (plus one level of guessing). */
+function homeCandidates() {
+  const home = os.homedir();
+  const dirs = [
+    path.join(home, 'MeshCoder'),
+    path.join(home, 'meshcoder'),
+    path.join(home, 'Documents', 'MeshCoder'),
+    path.join(home, 'Documents', 'GitHub', 'MeshCoder'),
+    path.join(home, 'source', 'repos', 'MeshCoder'),
+  ];
+  // A clone under a different name still counts if it holds the entry script.
+  for (const parent of [
+    home,
+    path.join(home, 'Documents'),
+    path.join(home, 'Documents', 'GitHub'),
+    path.join(home, 'source', 'repos'),
+  ]) {
+    try {
+      for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+        if (entry.isDirectory()) dirs.push(path.join(parent, entry.name));
+      }
+    } catch {
+      /* folder missing — skip */
+    }
+  }
+  return [...new Set(dirs)];
+}
+
+/** A directory is a MeshCoder home iff it holds the inference entry script. */
+function findHome() {
+  for (const dir of homeCandidates()) {
+    try {
+      if (fs.existsSync(path.join(dir, INFERENCE_REL))) return dir;
+    } catch {
+      /* unreadable — skip */
+    }
+  }
+  return '';
+}
+
+/**
+ * Does this python have the packages the pipeline needs (torch for
+ * inference, trimesh for the NPZ step)? Filesystem check only — no
+ * interpreter is launched, so a bare `python` stub that would open the
+ * Microsoft Store is never executed.
+ */
+function pythonHasDeps(pythonExe) {
+  const roots = [path.dirname(pythonExe), path.dirname(path.dirname(pythonExe))];
+  for (const root of roots) {
+    const winPkgs = path.join(root, 'Lib', 'site-packages');
+    if (
+      fs.existsSync(path.join(winPkgs, 'torch')) &&
+      fs.existsSync(path.join(winPkgs, 'trimesh'))
+    ) {
+      return true;
+    }
+    try {
+      const lib = path.join(root, 'lib');
+      for (const entry of fs.readdirSync(lib, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith('python')) continue;
+        const pkgs = path.join(lib, entry.name, 'site-packages');
+        if (
+          fs.existsSync(path.join(pkgs, 'torch')) &&
+          fs.existsSync(path.join(pkgs, 'trimesh'))
+        ) {
+          return true;
+        }
+      }
+    } catch {
+      /* no lib dir — try the next root */
+    }
+  }
+  return false;
+}
+
+function condaBaseDirs() {
+  const bases = [];
+  try {
+    const r = spawnSync('conda', ['info', '--base'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+    });
+    if (r.status === 0 && r.stdout) bases.push(r.stdout.trim());
+  } catch {
+    /* no conda on PATH */
+  }
+  const home = os.homedir();
+  for (const name of ['anaconda3', 'miniconda3', 'miniforge3']) {
+    bases.push(path.join(home, name));
+  }
+  if (process.env.LOCALAPPDATA) {
+    for (const name of ['anaconda3', 'miniconda3']) {
+      bases.push(path.join(process.env.LOCALAPPDATA, name));
+    }
+  }
+  return [...new Set(bases)].filter(Boolean);
+}
+
+function pyLauncherInterpreters() {
+  if (process.platform !== 'win32') return [];
+  try {
+    const r = spawnSync('py', ['-0p'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+    });
+    if (r.status !== 0 || !r.stdout) return [];
+    const out = [];
+    for (const line of r.stdout.split(/\r?\n/)) {
+      const m = line.match(/^\s*-V:\S+\s+\*?\s*(.+?)\s*$/);
+      if (m) out.push(m[1]);
+      else {
+        const d = line.match(/([A-Za-z]:\\[^"]*python\w*\.exe)/i);
+        if (d) out.push(d[1]);
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function pathPythons() {
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const arg = process.platform === 'win32' ? 'python' : 'python3';
+  try {
+    const r = spawnSync(cmd, [arg], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15000,
+    });
+    if (r.status !== 0 || !r.stdout) return [];
+    return r.stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.includes('WindowsApps')); // the Store stub, not an install
+  } catch {
+    return [];
+  }
+}
+
+function findPython() {
+  // Conda env pythons live at the env root on Windows (<env>\python.exe)
+  // but under bin/ on POSIX (<env>/bin/python).
+  const exeRel = process.platform === 'win32' ? 'python.exe' : path.join('bin', 'python');
+  const candidates = [];
+  for (const base of condaBaseDirs()) {
+    candidates.push(path.join(base, exeRel));
+    try {
+      const envsDir = path.join(base, 'envs');
+      for (const entry of fs.readdirSync(envsDir, { withFileTypes: true })) {
+        if (entry.isDirectory()) candidates.push(path.join(envsDir, entry.name, exeRel));
+      }
+    } catch {
+      /* no envs dir */
+    }
+  }
+  candidates.push(...pyLauncherInterpreters(), ...pathPythons());
+  for (const py of [...new Set(candidates)]) {
+    try {
+      if (fs.existsSync(py) && pythonHasDeps(py)) return py;
+    } catch {
+      /* unreadable — skip */
+    }
+  }
+  return '';
+}
+
+/**
+ * Fill in whatever the env vars / config file leave blank, from the usual
+ * places (clone folders, conda envs, the py launcher, PATH). Never
+ * overrides an explicitly set value.
+ */
+function detect() {
+  const cfg = loadConfig();
+  if (!cfg.home) cfg.home = findHome();
+  if (!cfg.python) cfg.python = findPython();
+  return cfg;
+}
+
+/**
+ * Detect missing pieces and persist them to meshcoder.json, so detection
+ * runs once and later runs just use the config. Returns the merged config
+ * plus which fields were newly detected.
+ */
+function detectAndSave() {
+  const before = loadConfig();
+  const cfg = detect();
+  const newly = {
+    home: !before.home && Boolean(cfg.home),
+    python: !before.python && Boolean(cfg.python),
+  };
+  if (newly.home || newly.python) saveConfig(cfg);
+  return { cfg, newly };
+}
+
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { ...opts, windowsHide: true });
@@ -86,10 +298,15 @@ function run(cmd, args, opts = {}) {
  * active workspace so generated code lands in the project folder).
  */
 async function convertToCode(meshPath, outDir) {
-  const cfg = loadConfig();
+  let cfg = loadConfig();
+  if (!isConfigured(cfg)) {
+    // One automatic attempt before giving up: a clone in the usual places
+    // and a conda env with torch + trimesh configure themselves.
+    cfg = detectAndSave().cfg;
+  }
   if (!isConfigured(cfg)) {
     throw new Error(
-      'MeshCoder is not configured. Set MESHCODER_HOME / MESHCODER_PYTHON ' +
+      'MeshCoder is not configured and auto-detection found nothing. Set MESHCODER_HOME / MESHCODER_PYTHON ' +
         `or edit ${configPath()} — see the MeshCoder section of the README.`
     );
   }
@@ -143,4 +360,4 @@ async function convertToCode(meshPath, outDir) {
   return codePath;
 }
 
-module.exports = { loadConfig, isConfigured, convertToCode, configPath };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython };
