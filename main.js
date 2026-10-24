@@ -775,6 +775,11 @@ function createMainWindow() {
   });
 
   buildMenu();
+  // The menu bar shrinks the content area (~28px on Windows) without
+  // firing a resize event, so lay out again now that it exists — otherwise
+  // the views keep their pre-menu bounds and the sidebar footer sits
+  // below the visible area until the user resizes the window.
+  layoutViews();
   return win;
 }
 
