@@ -233,6 +233,14 @@ function renderList() {
     open.title = isModel ? 'View in the in-app 3D viewer' : 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
+      // Report synchronously, before any IPC: if even this never shows,
+      // the click is not reaching this listener at all (stale renderer,
+      // frozen sidebar), which is a different problem from the viewer.
+      setStatus('Opening viewer…');
+      if (typeof bridge.view !== 'function') {
+        setStatus('Viewer unavailable — restart the app to load the new sidebar');
+        return;
+      }
       bridge.view(a.id).then((res) => {
         if (!res) setStatus('Viewer: no response');
         else if (res.ok === false) setStatus(res.message || 'Cannot open this file');
