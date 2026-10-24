@@ -77,7 +77,7 @@ let converting = false;
 /* the status line and the whole log is written to userData.          */
 /* ------------------------------------------------------------------ */
 
-const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null };
+const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null, autoFix: null };
 
 function pushSidebarStatus(text) {
   if (sidebarView && !sidebarView.webContents.isDestroyed()) {
@@ -111,7 +111,20 @@ function conversionProgressOpts() {
     onSyntaxIssue: (issue) => {
       conversionUi.syntaxIssue = issue;
     },
+    onAutoFix: (fix) => {
+      conversionUi.autoFix = fix;
+    },
   };
+}
+
+/** One-line description of an automatic syntax repair, for status text. */
+function autoFixNote(codePath) {
+  const fix = conversionUi.autoFix;
+  if (!fix) return '';
+  const orig = `${path.basename(codePath)}.orig`;
+  return fix.kind === 'brackets'
+    ? `Auto-fixed a bracket slip on line ${fix.line}; the model's original is kept as ${orig}.`
+    : `The first pass had a syntax error, so the code was regenerated once with sampling on; the model's original is kept as ${orig}.`;
 }
 
 function startConversionUi(filePath) {
@@ -120,6 +133,7 @@ function startConversionUi(filePath) {
   conversionUi.startedAt = Date.now();
   conversionUi.lines = [];
   conversionUi.syntaxIssue = null;
+  conversionUi.autoFix = null;
   pushSidebarStatus(conversionStatusText());
   clearInterval(conversionUi.timer);
   conversionUi.timer = setInterval(() => {
@@ -1109,7 +1123,9 @@ async function convertLastDownload() {
     compounding.harvest(codePath, path.basename(lastDownloadPath));
     notifySidebar();
     new Notification({ title: 'Hunyuan3D', body: `Blender code saved: ${path.basename(codePath)}` }).show();
-    if (conversionUi.syntaxIssue) {
+    if (conversionUi.autoFix) {
+      pushSidebarStatus(`Saved ${path.basename(codePath)} — ${autoFixNote(codePath)}`);
+    } else if (conversionUi.syntaxIssue) {
       const si = conversionUi.syntaxIssue;
       pushSidebarStatus(
         `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed (click to copy)${si.text ? `\n${si.text}` : ''}`
@@ -1810,9 +1826,11 @@ function registerIpc() {
       shell.showItemInFolder(codePath);
       const si = conversionUi.syntaxIssue;
       return {
-        message: si
-          ? `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed${si.text ? `\n${si.text}` : ''}`
-          : `Saved ${path.basename(codePath)}`,
+        message: conversionUi.autoFix
+          ? `Saved ${path.basename(codePath)} — ${autoFixNote(codePath)}`
+          : si
+            ? `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed${si.text ? `\n${si.text}` : ''}`
+            : `Saved ${path.basename(codePath)}`,
       };
     } catch (err) {
       const detail = String(err && err.message ? err.message : err);

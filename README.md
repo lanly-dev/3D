@@ -117,9 +117,13 @@ torch + trimesh and save them to the config.
 
 Then use **Tools → Convert last download to Blender code**, or the **To
 Blender** button on a mesh row. After each conversion the app parses
-the generated script and flags any syntax error (with its line) in the
-status bar — MeshCoder's output is model-generated and occasionally
-contains a malformed line that Blender would reject.
+the generated script — MeshCoder's output is model-generated and
+occasionally contains a malformed line that Blender would reject.
+Bracket slips at the end of a line are repaired automatically, and
+if that fails the code is regenerated once with sampling on; the
+model's original output is kept as `<name>.blender.py.orig` either
+way. A syntax error that survives both attempts is flagged (with its
+line) in the status bar.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
