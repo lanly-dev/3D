@@ -54,6 +54,9 @@ const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'g
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_DEFAULT_WIDTH = 288;
+
+// Top navigation bar (back / forward / reload), under the app menu.
+const NAV_BAR_HEIGHT = 34;
 const SIDEBAR_COLLAPSED_WIDTH = 36;
 
 let lastDownloadPath = null;
@@ -63,6 +66,7 @@ let converting = false;
 let mainWindow = null;
 let sidebarView = null;
 let siteView = null;
+let navView = null;
 let sidebarVisible = true;
 let sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
 
@@ -487,7 +491,8 @@ function saveLayout() {
 }
 
 /**
- * Layout: the main window hosts two WebContentsViews —
+ * Layout: the main window hosts three WebContentsViews —
+ *   - navView:     a slim top bar with back / forward / reload buttons
  *   - sidebarView: the local asset dashboard (file:// page)
  *   - siteView:    the Hunyuan3D web app
  * The sidebar can be collapsed/expanded and resized by dragging its edge.
@@ -543,6 +548,17 @@ function createMainWindow() {
 
   mainWindow = win;
 
+  // --- top navigation bar --------------------------------------------
+  navView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'nav-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  navView.webContents.loadFile(path.join(__dirname, 'nav.html'));
+
   // --- sidebar view -------------------------------------------------
   sidebarView = new WebContentsView({
     webPreferences: {
@@ -565,11 +581,16 @@ function createMainWindow() {
   siteView.webContents.setUserAgent(CHROME_UA);
   siteView.webContents.loadURL(HOME_URL);
   applyWindowOpenHandler(siteView.webContents);
+  // Keep the nav bar's back/forward arrows in sync with the site history.
+  siteView.webContents.on('did-navigate', pushNavState);
+  siteView.webContents.on('did-navigate-in-page', pushNavState);
+  siteView.webContents.on('did-finish-load', pushNavState);
   if (settings.translateToEnglish) {
     const siteContents = siteView.webContents;
     siteContents.on('dom-ready', () => injectTranslator(siteContents));
   }
 
+  win.contentView.addChildView(navView);
   win.contentView.addChildView(sidebarView);
   win.contentView.addChildView(siteView);
 
@@ -580,6 +601,7 @@ function createMainWindow() {
 
   win.on('closed', () => {
     mainWindow = null;
+    navView = null;
     sidebarView = null;
     siteView = null;
   });
@@ -588,13 +610,51 @@ function createMainWindow() {
   return win;
 }
 
-/** Position the sidebar and the site view inside the window. */
+/** Position the nav bar, sidebar and site view inside the window. */
 function layoutViews() {
   if (!mainWindow || !sidebarView || !siteView) return;
   const { width: w, height: h } = mainWindow.getContentBounds();
   const sidebarW = sidebarVisible ? Math.round(sidebarWidth) : SIDEBAR_COLLAPSED_WIDTH;
-  sidebarView.setBounds({ x: 0, y: 0, width: sidebarW, height: h });
-  siteView.setBounds({ x: sidebarW, y: 0, width: Math.max(0, w - sidebarW), height: h });
+  const below = Math.max(0, h - NAV_BAR_HEIGHT);
+  if (navView) navView.setBounds({ x: 0, y: 0, width: w, height: NAV_BAR_HEIGHT });
+  sidebarView.setBounds({ x: 0, y: NAV_BAR_HEIGHT, width: sidebarW, height: below });
+  siteView.setBounds({ x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: below });
+}
+
+/** navigationHistory is the modern API; fall back to the legacy methods. */
+function navCan(wc, dir) {
+  try {
+    if (wc.navigationHistory) {
+      return dir === 'back' ? wc.navigationHistory.canGoBack() : wc.navigationHistory.canGoForward();
+    }
+    return dir === 'back' ? wc.canGoBack() : wc.canGoForward();
+  } catch {
+    return false;
+  }
+}
+
+function navGo(wc, dir) {
+  try {
+    if (wc.navigationHistory) {
+      if (dir === 'back') wc.navigationHistory.goBack();
+      else wc.navigationHistory.goForward();
+    } else if (dir === 'back') {
+      wc.goBack();
+    } else {
+      wc.goForward();
+    }
+  } catch {
+    /* navigation raced a page change — nothing to do */
+  }
+}
+
+/** Enable/disable the nav bar arrows to match the site view's history. */
+function pushNavState() {
+  if (!navView || navView.webContents.isDestroyed() || !siteView) return;
+  navView.webContents.send('nav:state', {
+    canGoBack: navCan(siteView.webContents, 'back'),
+    canGoForward: navCan(siteView.webContents, 'forward'),
+  });
 }
 
 function setSidebarVisible(visible) {
@@ -920,8 +980,25 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/** IPC surface used by the sidebar renderer. */
+/** IPC surface used by the sidebar and nav bar renderers. */
 function registerIpc() {
+  // Top navigation bar: back / forward / reload for the site view.
+  ipcMain.on('nav:back', () => {
+    if (siteView) {
+      navGo(siteView.webContents, 'back');
+      pushNavState();
+    }
+  });
+  ipcMain.on('nav:forward', () => {
+    if (siteView) {
+      navGo(siteView.webContents, 'forward');
+      pushNavState();
+    }
+  });
+  ipcMain.on('nav:reload', () => {
+    if (siteView) siteView.webContents.reload();
+  });
+
   ipcMain.handle('assets:list', (_e, workspaceId) => assets.list(workspaceId || null));
   ipcMain.handle('assets:stats', (_e, workspaceId) => assets.stats(workspaceId || null));
   ipcMain.handle('assets:track', (_e, filePath, workspaceId) => {

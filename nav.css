@@ -1,0 +1,52 @@
+/* Top navigation bar — sits under the app menu, buttons on the right.
+   Palette mirrors sidebar.css. */
+:root {
+  --bg: #14161b;
+  --bg-3: #232733;
+  --line: #2c313d;
+  --fg: #e7eaf0;
+  --fg-dim: #949cad;
+  --accent: #4c8dff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.nav-group { display: flex; align-items: center; gap: 4px; }
+
+.nav-btn {
+  width: 30px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.nav-btn:hover { background: var(--bg-3); border-color: var(--line); }
+.nav-btn:active { background: var(--bg-3); color: var(--accent); }
+.nav-btn:disabled { color: var(--fg-dim); opacity: .45; cursor: default; }
+.nav-btn:disabled:hover { background: transparent; border-color: transparent; }
