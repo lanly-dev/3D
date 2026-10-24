@@ -91,8 +91,13 @@ checkpoints from Hugging Face, and verifies by importing the inference
 module. Two gaps in MeshCoder's recipe are bridged with stand-ins in
 `meshcoder-shim/`: `pytorch3d` (no Windows builds; the setup installs a
 functional pure-PyTorch implementation of the three pieces the import
-chain touches) and `bpy` (4.0.0 was never published to PyPI; an
-import-only stub covers the training-evaluation module that imports it).
+chain touches) and `bpy` (4.0.0 was never published to PyPI; a
+stand-in makes `bpy.ops.*` calls no-ops). Inference always runs
+MeshCoder's reconstruction scoring after generating the code, and
+that scoring cannot run on native Windows (it time-limits each script
+with the Unix-only SIGALRM), so conversions skip the score — the
+generated `.blender.py` is still written; only the Chamfer-distance
+metrics in MeshCoder's own eval output are absent.
 `accelerate` is pinned to 1.11.0, the last line whose `accelerate.utils`
 still exports a name MeshCoder imports. The checkpoints
 are gated: submit the one-time access form on the

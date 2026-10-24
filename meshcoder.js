@@ -349,6 +349,10 @@ async function convertToCode(meshPath, outDir, opts = {}) {
         `or edit ${configPath()} — see the MeshCoder section of the README.`
     );
   }
+  // If the app manages this env, make sure the compatibility stand-ins
+  // are current — a shim fix then lands with an app update, with no
+  // setup re-run. Never touches a python the app does not own.
+  refreshShimsIfManaged(cfg);
   const base = path.basename(meshPath, path.extname(meshPath));
   const dir = outDir ? path.resolve(outDir) : path.dirname(meshPath);
   try {
@@ -412,13 +416,18 @@ async function convertToCode(meshPath, outDir, opts = {}) {
 /* the real inference module):                                        */
 /*   - pytorch3d has no Windows builds, and bpy==4.0.0 was never      */
 /*     published to PyPI at all. Both are imported at module level    */
-/*     by a training-time evaluation module in the inference chain,   */
+/*     by a reconstruction-evaluation module in the inference chain,  */
 /*     so the setup installs small stand-ins (meshcoder-shim/): a     */
 /*     functional pure-PyTorch pytorch3d (chamfer_distance,           */
-/*     sample_points_from_meshes, Meshes) and an import-only bpy      */
-/*     stub — the code paths that would call bpy belong to            */
-/*     training evaluation and cannot run on Windows anyway           */
-/*     (signal.SIGALRM).                                              */
+/*     sample_points_from_meshes, Meshes) and a bpy stand-in whose    */
+/*     bpy.ops.* calls are no-ops. Inference generates the code       */
+/*     first, then scores it via batch_code_to_mesh — which cannot   */
+/*     run on Windows anyway (its per-script time limit uses the     */
+/*     Unix-only signal.SIGALRM), so every script scores success=0   */
+/*     and the generated code is still saved; only the Chamfer-      */
+/*     distance metrics are skipped. The one bpy call that must not  */
+/*     raise is the failure handler's read_homefile() reset — it     */
+/*     sits outside the per-script try/except.                       */
 /*   - accelerate is pinned to 1.11.0: newer releases renamed         */
 /*     is_ccl_available, which MeshCoder's code imports.              */
 /*   - fvcore/iopath are only pytorch3d dependencies; the inference   */
@@ -723,12 +732,30 @@ function installShims(onLog = () => {}) {
     onLog('A real bpy module is installed — leaving it in place.');
   } else if (!fs.existsSync(path.join(dest, 'bpy')) && !fs.existsSync(bpyDest)) {
     fs.copyFileSync(path.join(srcRoot, 'bpy.py'), bpyDest);
-    onLog('Installed the import-only bpy stub.');
+    onLog('Installed the bpy stand-in (bpy.ops calls are no-ops).');
   } else if (fs.existsSync(bpyDest)) {
     fs.copyFileSync(path.join(srcRoot, 'bpy.py'), bpyDest);
-    onLog('Refreshed the import-only bpy stub.');
+    onLog('Refreshed the bpy stand-in.');
   }
   return dest;
+}
+
+/**
+ * Refresh the stand-ins in the app-managed env (the one setup built).
+ * A configured python that is not the managed env's is the user's own
+ * install — never write into it. Failures are swallowed: a stale shim
+ * must not block a conversion that would otherwise run.
+ */
+function refreshShimsIfManaged(cfg) {
+  try {
+    if (cfg && cfg.python && path.resolve(cfg.python) === path.resolve(envPython())) {
+      installShims();
+      return true;
+    }
+  } catch {
+    /* best effort only */
+  }
+  return false;
 }
 
 /**
@@ -753,4 +780,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
