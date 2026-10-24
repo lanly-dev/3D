@@ -32,6 +32,7 @@
 const { app } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
+const https = require('https');
 const os = require('os');
 const path = require('path');
 
@@ -395,4 +396,300 @@ async function convertToCode(meshPath, outDir) {
   return codePath;
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL };
+/* ------------------------------------------------------------------ */
+/* Automatic setup (native Windows — no WSL2, no conda).              */
+/*                                                                    */
+/* A venv in Documents/Hunyuan3D/MeshCoderEnv, built from a Python    */
+/* 3.10 (the user's own, or the official installer), the pip-         */
+/* installable subset of MeshCoder's recipe, and the checkpoints      */
+/* from Hugging Face. Two recipe entries are deliberately skipped:    */
+/* pytorch3d (no Windows builds exist; inference never imports it —   */
+/* its one import in the entry script is commented out) and bpy       */
+/* (Blender's module; the inference path saves meshes via trimesh).   */
+/* ------------------------------------------------------------------ */
+
+const HF_REPO = 'InternRobotics/MeshCoder';
+const HF_API = `https://huggingface.co/api/models/${HF_REPO}?blobs=true`;
+const HF_RESOLVE = `https://huggingface.co/${HF_REPO}/resolve/main`;
+const PY310_INSTALLER_URL = 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe';
+// Root files of the HF repo that belong in object_to_code_model/.
+// Everything under Llama3.2-1B/ keeps its path inside Llama3.2-1B/.
+const OBJECT_TO_CODE_FILES = ['adapter_config.json', 'adapter_model.safetensors', 'config.yaml', 'shape_tokenizer.pt'];
+
+/** The app-managed env folder (sibling of the managed clone). */
+function envDir() {
+  return path.join(os.homedir(), 'Documents', 'Hunyuan3D', 'MeshCoderEnv');
+}
+
+function envPython() {
+  return process.platform === 'win32'
+    ? path.join(envDir(), 'Scripts', 'python.exe')
+    : path.join(envDir(), 'bin', 'python');
+}
+
+function checkpointsPresent(home) {
+  if (!home) return false;
+  const o2c = path.join(home, 'llama-3-models', 'object_to_code_model');
+  const llama = path.join(home, 'llama-3-models', 'Llama3.2-1B');
+  return (
+    OBJECT_TO_CODE_FILES.every((f) => fs.existsSync(path.join(o2c, f))) &&
+    fs.existsSync(path.join(llama, 'model.safetensors')) &&
+    fs.existsSync(path.join(llama, 'config.json')) &&
+    fs.existsSync(path.join(llama, 'tokenizer.json'))
+  );
+}
+
+/**
+ * Map the HF repo's file list ([{path, size}]) to download jobs with local
+ * destinations under <home>/llama-3-models. Repo docs/attributes are not
+ * checkpoints and are skipped.
+ */
+function checkpointPlan(home, siblings) {
+  const plan = [];
+  for (const s of siblings || []) {
+    const rel = String((s && (s.path || s.rfilename)) || '');
+    if (!rel) continue;
+    let dest = null;
+    if (rel.startsWith('Llama3.2-1B/')) {
+      dest = path.join(home, 'llama-3-models', rel);
+    } else if (OBJECT_TO_CODE_FILES.includes(rel)) {
+      dest = path.join(home, 'llama-3-models', 'object_to_code_model', rel);
+    } else {
+      continue;
+    }
+    plan.push({ rel, url: `${HF_RESOLVE}/${rel}`, dest, size: s.size || 0 });
+  }
+  return plan;
+}
+
+function httpGet(url, headers, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers }, (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        res.resume();
+        if (redirects >= 6) return reject(new Error('Too many redirects'));
+        // The CDN target of a redirect is pre-signed — drop the token.
+        const next = new URL(res.headers.location, url);
+        const hdrs = next.host === new URL(url).host ? headers : {};
+        return resolve(httpGet(next.href, hdrs, redirects + 1));
+      }
+      resolve(res);
+    });
+    req.on('error', reject);
+  });
+}
+
+async function fetchJson(url, token) {
+  const res = await httpGet(url, token ? { Authorization: `Bearer ${token}` } : {});
+  if (res.statusCode !== 200) {
+    res.resume();
+    throw new Error(`Hugging Face answered HTTP ${res.statusCode}${res.statusCode === 401 || res.statusCode === 403 ? ' — access needs your token, and the one-time access form on the model page must be submitted first' : ''}`);
+  }
+  const body = await new Promise((resolve, reject) => {
+    let data = '';
+    res.setEncoding('utf8');
+    res.on('data', (d) => { data += d; });
+    res.on('end', () => resolve(data));
+    res.on('error', reject);
+  });
+  return JSON.parse(body);
+}
+
+/**
+ * Download one file, streaming progress. `registerCancel(fn)` hands the
+ * caller a way to abort the transfer.
+ */
+function downloadFile(url, dest, { token, onProgress = () => {}, registerCancel } = {}) {
+  return (async () => {
+    const res = await httpGet(url, token ? { Authorization: `Bearer ${token}` } : {});
+    if (res.statusCode !== 200) {
+      res.resume();
+      throw new Error(`Download failed with HTTP ${res.statusCode} for ${path.basename(dest)}${res.statusCode === 401 || res.statusCode === 403 ? ' — Hugging Face needs a token with access to the model (submit the access form on the model page first)' : ''}`);
+    }
+    const total = Number(res.headers['content-length'] || 0);
+    let done = 0;
+    await new Promise((resolve, reject) => {
+      const out = fs.createWriteStream(dest);
+      if (registerCancel) {
+        registerCancel(() => {
+          res.destroy(new Error('Download cancelled'));
+          out.destroy();
+          reject(new Error('Download cancelled'));
+        });
+      }
+      res.on('data', (chunk) => {
+        done += chunk.length;
+        onProgress(done, total);
+      });
+      res.on('error', reject);
+      out.on('error', reject);
+      out.on('finish', resolve);
+      res.pipe(out);
+    });
+    return done;
+  })();
+}
+
+/** Download every missing checkpoint file into <home>/llama-3-models. */
+async function downloadCheckpoints(home, token, { onLog = () => {}, onProgress = () => {}, registerCancel } = {}) {
+  const info = await fetchJson(HF_API, token);
+  const plan = checkpointPlan(home, info.siblings);
+  if (!plan.length) throw new Error('Hugging Face returned no checkpoint files for InternRobotics/MeshCoder.');
+  const totalBytes = plan.reduce((a, p) => a + (p.size || 0), 0);
+  let doneBytes = 0;
+  for (const item of plan) {
+    if (item.size && fs.existsSync(item.dest) && fs.statSync(item.dest).size === item.size) {
+      doneBytes += item.size;
+      onProgress(doneBytes, totalBytes);
+      continue;
+    }
+    fs.mkdirSync(path.dirname(item.dest), { recursive: true });
+    onLog(`Downloading ${item.rel} (${item.size ? `${(item.size / 1e6).toFixed(0)} MB` : 'size unknown'})…`);
+    const written = await downloadFile(item.url, item.dest, {
+      token,
+      registerCancel,
+      onProgress: (n) => onProgress(doneBytes + n, totalBytes),
+    });
+    doneBytes += item.size || written;
+    onProgress(doneBytes, totalBytes);
+  }
+  return plan.length;
+}
+
+function pythonVersion(exe) {
+  try {
+    const r = spawnSync(exe, ['--version'], { encoding: 'utf8', windowsHide: true });
+    const m = /Python (\d+)\.(\d+)\.(\d+)/.exec(`${r.stdout || ''} ${r.stderr || ''}`);
+    return m ? { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every enumerable real interpreter path (Store stubs excluded). */
+function basePythonCandidates() {
+  const seen = new Set();
+  const out = [];
+  const add = (p) => {
+    if (p && !/WindowsApps/i.test(p) && !seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+    }
+  };
+  for (const p of pyLauncherInterpreters()) add(p);
+  for (const p of pathPythons()) add(p);
+  for (const base of condaBaseDirs()) {
+    add(process.platform === 'win32' ? path.join(base, 'python.exe') : path.join(base, 'bin', 'python'));
+  }
+  return out;
+}
+
+/**
+ * Find an installed Python 3.10 (any patch level) to build the venv from.
+ * Runs --version on real installs only (never the Store stub) — setup is
+ * an explicit user action, unlike silent detection.
+ */
+function findBasePython310() {
+  for (const exe of basePythonCandidates()) {
+    if (!fs.existsSync(exe)) continue;
+    const v = pythonVersion(exe);
+    if (v && v.major === 3 && v.minor === 10) return exe;
+  }
+  return '';
+}
+
+/** Download and silently install Python 3.10.11 per-user (Windows only). */
+async function installPython310({ onLog = () => {}, registerCancel } = {}) {
+  if (process.platform !== 'win32') {
+    throw new Error('Automatic Python installation is Windows-only — install Python 3.10 manually.');
+  }
+  const installer = path.join(os.tmpdir(), 'python-3.10.11-amd64.exe');
+  onLog('Downloading Python 3.10.11 from python.org…');
+  await downloadFile(PY310_INSTALLER_URL, installer, { registerCancel });
+  onLog('Installing Python 3.10 (per-user, silent)…');
+  await run(installer, ['/quiet', 'InstallAllUsers=0', 'PrependPath=0', 'Include_launcher=1', 'Include_test=0']);
+  const found = findBasePython310();
+  if (!found) throw new Error('Python 3.10 installation finished, but no 3.10 interpreter was found afterwards.');
+  return found;
+}
+
+/**
+ * Spawn with line-streamed output (for the setup window's log).
+ * `registerChild(child)` lets the caller kill the running step on cancel.
+ */
+function runStreaming(cmd, args, { cwd, onLog = () => {}, registerChild } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd, windowsHide: true });
+    if (registerChild) registerChild(child);
+    const push = (buf) => {
+      for (const line of String(buf).split(/\r?\n/)) {
+        if (line.trim()) onLog(line.slice(0, 300));
+      }
+    };
+    child.stdout.on('data', push);
+    child.stderr.on('data', push);
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${path.basename(cmd)} exited with code ${code}`));
+    });
+  });
+}
+
+/** Create the venv (idempotent — an existing env python is kept). */
+async function createEnv(basePython, { onLog = () => {}, registerChild } = {}) {
+  if (fs.existsSync(envPython())) return envPython();
+  fs.mkdirSync(path.dirname(envDir()), { recursive: true });
+  await runStreaming(basePython, ['-m', 'venv', envDir()], { onLog, registerChild });
+  if (!fs.existsSync(envPython())) throw new Error('venv creation finished, but its python.exe is missing.');
+  return envPython();
+}
+
+/**
+ * The pip install sequence, as data so the caller can run and label the
+ * steps. Mirrors MeshCoder's README recipe with these native-Windows
+ * adjustments: fvcore/iopath via pip (pure Python), xformers optional
+ * (only used by the fast-kernels path, which conversion does not enable),
+ * pytorch3d and bpy skipped (see the section note above).
+ */
+function installSteps(home) {
+  const py = envPython();
+  const step = (label, extra, extraOpts = {}) => ({
+    label,
+    cmd: py,
+    args: ['-m', 'pip', 'install', ...extra],
+    ...extraOpts,
+  });
+  return [
+    step('Upgrade pip', ['--upgrade', 'pip']),
+    step('PyTorch 2.4.1 + CUDA 11.8', ['torch==2.4.1', 'torchvision==0.19.1', 'torchaudio==2.4.1', '--index-url', 'https://download.pytorch.org/whl/cu118']),
+    step('torch-scatter', ['torch-scatter', '-f', 'https://data.pyg.org/whl/torch-2.4.1+cu118.html']),
+    step('Remaining packages', ['opencv-python', 'trimesh', 'jaxtyping', 'einops', 'omegaconf', 'scikit-image', 'wandb', 'mathutils', 'boto3', 'typeguard', 'fvcore', 'iopath', 'fire', 'gradio']),
+    step('xformers (optional)', ['-U', 'xformers==0.0.28', '--index-url', 'https://download.pytorch.org/whl/cu118', '--no-deps'], { optional: true }),
+    step('MeshCoder package', ['-e', home]),
+  ];
+}
+
+/**
+ * The real gate: import the inference module exactly as conversion will
+ * (same interpreter, its own folder as cwd). Also reports CUDA visibility.
+ */
+async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
+  const py = envPython();
+  const inferenceDir = path.join(home, path.dirname(INFERENCE_REL));
+  await runStreaming(py, ['-c', 'import inference_shape2code_point_input; print("inference module imports cleanly")'], {
+    cwd: inferenceDir,
+    onLog,
+    registerChild,
+  });
+  let cuda = false;
+  try {
+    const r = spawnSync(py, ['-c', 'import torch; print(torch.cuda.is_available())'], { encoding: 'utf8', windowsHide: true });
+    cuda = /True/.test(r.stdout || '');
+  } catch {
+    /* reported as false below */
+  }
+  return { cuda };
+}
+
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, HF_REPO };

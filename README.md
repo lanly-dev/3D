@@ -82,19 +82,29 @@ touches the file on disk.
 MeshCoder runs in its own Python env (needs a CUDA GPU) — it does not run
 inside Electron.
 
-1. Get the MeshCoder code. If no clone is found, the app offers to download
-   it for you into `Documents/Hunyuan3D/MeshCoder` (a shallow `git clone`;
-   git must be on PATH). Cloning it yourself into any of the usual folders
-   works too.
-2. Create its conda env per its README (Python 3.10, PyTorch 2.4.1 +
-   CUDA 11.8). WSL2 is the smoother path on Windows.
-3. Download the checkpoints into `MeshCoder/llama-3-models/`:
-   `Llama3.2-1B/` (base model) and `object_to_code_model/` (tokenizer + LoRA).
-4. Point the app at it via **Tools → Open MeshCoder config** (`home`, `python`)
-   or the `MESHCODER_HOME` / `MESHCODER_PYTHON` env vars. Step 4 is usually
-   unnecessary: **Tools → Detect MeshCoder automatically** (and every
-   conversion attempt) finds a clone in the usual folders and a conda env
-   with torch + trimesh, and saves them to the config.
+**Automatic (native Windows):** **Tools → Set up MeshCoder automatically…**
+(or accept the offer when a conversion finds MeshCoder missing). The app
+clones the code into `Documents/Hunyuan3D/MeshCoder` if needed, creates a
+Python 3.10 venv in `Documents/Hunyuan3D/MeshCoderEnv` (installing Python
+3.10 itself if none is found), pip-installs the packages, downloads the
+checkpoints from Hugging Face, and verifies by importing the inference
+module. Two entries of MeshCoder's conda recipe are skipped on purpose:
+`pytorch3d` (no Windows builds exist, and the inference path never imports
+it) and `bpy` (the inference path saves meshes via trimesh). The checkpoints
+are gated: submit the one-time access form on the
+[Hugging Face model page](https://huggingface.co/InternRobotics/MeshCoder)
+first, then paste a token into the setup window — it is used once and never
+saved.
+
+**Manual:** clone MeshCoder anywhere in the usual folders, create an env
+with its dependencies (Python 3.10, PyTorch 2.4.1 + CUDA 11.8; their README
+uses conda), and download the checkpoints into
+`MeshCoder/llama-3-models/`: `Llama3.2-1B/` (base model) and
+`object_to_code_model/` (tokenizer + LoRA). Then point the app at it via
+**Tools → Open MeshCoder config** (`home`, `python`) or the
+`MESHCODER_HOME` / `MESHCODER_PYTHON` env vars — or let
+**Tools → Detect MeshCoder automatically** find the clone and an env with
+torch + trimesh and save them to the config.
 
 Then use **Tools → Convert last download to Blender code**, or the **To
 Blender** button on a mesh row.

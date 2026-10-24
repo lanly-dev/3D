@@ -1175,11 +1175,17 @@ async function ensureMeshcoder(win) {
     new Notification({ title: 'Hunyuan3D', body: `MeshCoder downloaded to ${dest}` }).show();
   }
   if (meshcoder.isConfigured()) return true;
-  await dialog.showMessageBox(win, {
-    type: 'warning',
-    message: 'MeshCoder still needs its Python env',
-    detail: 'The code is in place, but no Python with torch + trimesh was found. Create the conda env per the MeshCoder README, then run Tools → Detect MeshCoder automatically.',
+  // Code is in place; the env and/or checkpoints are missing. Offer the
+  // automated native-Windows setup rather than manual instructions.
+  const pick = await dialog.showMessageBox(win, {
+    type: 'question',
+    buttons: ['Set up automatically', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'MeshCoder needs its env and checkpoints',
+    detail: 'The code is in place. Automatic setup (native Windows — no WSL2, no conda) creates a Python 3.10 env in Documents\\Hunyuan3D\\MeshCoderEnv, installs the packages (several GB), and downloads the checkpoints from Hugging Face (one-time access form on the model page, plus your token).',
   });
+  if (pick.response === 0) openSetupWindow();
   return false;
 }
 
@@ -1192,6 +1198,157 @@ async function detectMeshcoder() {
     message: 'MeshCoder ready',
     detail: `Home: ${cfg.home}\nPython: ${cfg.python}\n\nSaved to ${meshcoder.configPath()}.`,
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* MeshCoder automatic setup window: clone (if needed) -> Python 3.10  */
+/* -> venv -> pip packages -> HF checkpoints -> import verification.   */
+/* Native Windows only; the log streams to the window so a 20-minute   */
+/* install is watchable and cancellable.                               */
+/* ------------------------------------------------------------------ */
+
+let setupWin = null;
+let setupRunning = false;
+let setupCancelled = false;
+let setupChild = null;
+let setupCancelDownload = null;
+
+function openSetupWindow() {
+  if (setupWin && !setupWin.isDestroyed()) {
+    setupWin.focus();
+    return setupWin;
+  }
+  setupWin = new BrowserWindow({
+    width: 780,
+    height: 620,
+    title: 'MeshCoder setup',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'setup-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  setupWin.on('closed', () => {
+    setupWin = null;
+  });
+  setupWin.loadFile(path.join(__dirname, 'setup.html'));
+  return setupWin;
+}
+
+function setupLog(line) {
+  if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send('setup:log', String(line));
+}
+
+function setupState(state) {
+  if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send('setup:state', state);
+}
+
+async function runSetup(token) {
+  if (setupRunning) return { ok: false, message: 'Setup is already running' };
+  setupRunning = true;
+  setupCancelled = false;
+  const log = (line) => setupLog(line);
+  const registerChild = (child) => {
+    setupChild = child;
+  };
+  const registerCancel = (fn) => {
+    setupCancelDownload = fn;
+  };
+  const checkCancel = () => {
+    if (setupCancelled) throw new Error('Setup cancelled');
+  };
+  try {
+    // 1. Clone (usually already handled by the download offer).
+    let home = meshcoder.loadConfig().home || meshcoder.detect().home;
+    if (!home) {
+      setupState({ phase: 'running', label: 'Cloning MeshCoder…', pct: -1 });
+      home = await meshcoder.cloneRepo(meshcoder.downloadDest());
+      log(`Cloned MeshCoder to ${home}`);
+    } else {
+      log(`MeshCoder clone: ${home}`);
+    }
+    checkCancel();
+    // 2. Env: base Python 3.10 (install if missing), then the venv.
+    if (!fs.existsSync(meshcoder.envPython())) {
+      setupState({ phase: 'running', label: 'Finding Python 3.10…', pct: -1 });
+      let base = meshcoder.findBasePython310();
+      if (!base) {
+        log('No Python 3.10 found — installing it from python.org.');
+        base = await meshcoder.installPython310({ onLog: log, registerCancel });
+      }
+      log(`Base Python: ${base}`);
+      checkCancel();
+      setupState({ phase: 'running', label: 'Creating the env…', pct: -1 });
+      await meshcoder.createEnv(base, { onLog: log, registerChild });
+      log(`Env created: ${meshcoder.envDir()}`);
+    } else {
+      log(`Env already exists: ${meshcoder.envDir()} (pip will check its packages)`);
+    }
+    // 3. Packages.
+    const steps = meshcoder.installSteps(home);
+    for (let i = 0; i < steps.length; i += 1) {
+      checkCancel();
+      const s = steps[i];
+      setupState({ phase: 'running', label: `Packages ${i + 1}/${steps.length}: ${s.label}`, pct: -1 });
+      log(`\n=== ${s.label} ===`);
+      try {
+        await meshcoder.runStreaming(s.cmd, s.args, { cwd: s.cwd, onLog: log, registerChild });
+      } catch (err) {
+        if (setupCancelled) throw err;
+        if (s.optional) {
+          log(`(optional step failed — continuing: ${err.message})`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    checkCancel();
+    // 4. Checkpoints from Hugging Face.
+    if (!meshcoder.checkpointsPresent(home)) {
+      setupState({ phase: 'running', label: 'Downloading checkpoints…', pct: 0 });
+      await meshcoder.downloadCheckpoints(home, token, {
+        onLog: log,
+        registerCancel,
+        onProgress: (done, total) => {
+          if (total) {
+            setupState({ phase: 'running', label: 'Downloading checkpoints…', pct: Math.floor((done / total) * 100) });
+          }
+        },
+      });
+      log('Checkpoints downloaded.');
+    } else {
+      log('Checkpoints already present.');
+    }
+    checkCancel();
+    // 5. Verify exactly as conversion will run, then persist the config.
+    setupState({ phase: 'running', label: 'Verifying the install…', pct: -1 });
+    const { cuda } = await meshcoder.verifyEnv(home, { onLog: log, registerChild });
+    meshcoder.saveConfig({ home, python: meshcoder.envPython() });
+    log(
+      cuda
+        ? '\nSetup complete — MeshCoder imports cleanly and CUDA is visible.'
+        : '\nSetup complete — imports pass, but PyTorch cannot see CUDA. Conversions need the GPU; check the NVIDIA driver.'
+    );
+    setupState({ phase: 'done', label: cuda ? 'Setup complete' : 'Setup complete (CUDA not visible — check the NVIDIA driver)', pct: 100 });
+    new Notification({ title: 'Hunyuan3D', body: 'MeshCoder setup finished.' }).show();
+    return { ok: true };
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    if (setupCancelled || /cancelled/i.test(msg)) {
+      log('\nSetup cancelled. Re-running setup resumes where it left off.');
+      setupState({ phase: 'cancelled', label: 'Setup cancelled', pct: -1 });
+    } else {
+      log(`\nSetup failed: ${msg}`);
+      log('Tip: if the env is half-created, delete Documents\\Hunyuan3D\\MeshCoderEnv and run setup again.');
+      setupState({ phase: 'error', label: `Failed: ${msg.slice(0, 140)}`, pct: -1 });
+    }
+    return { ok: false, message: msg };
+  } finally {
+    setupRunning = false;
+    setupChild = null;
+    setupCancelDownload = null;
+  }
 }
 
 /**
@@ -1361,6 +1518,7 @@ function buildMenu() {
         },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
+        { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
         { type: 'separator' },
         {
           label: 'Compound active workspace',
@@ -1460,6 +1618,23 @@ function registerIpc() {
       },
     ]);
     menu.popup({ window: mainWindow });
+    return true;
+  });
+  ipcMain.handle('setup:start', (_e, token) => runSetup(String(token || '').trim()));
+  ipcMain.handle('setup:cancel', () => {
+    setupCancelled = true;
+    if (setupChild && !setupChild.killed) setupChild.kill();
+    if (setupCancelDownload) {
+      try {
+        setupCancelDownload();
+      } catch {
+        /* already settled */
+      }
+    }
+    return true;
+  });
+  ipcMain.handle('setup:openModelPage', () => {
+    shell.openExternal('https://huggingface.co/InternRobotics/MeshCoder');
     return true;
   });
   ipcMain.handle('assets:reveal', (_e, filePath) => {
