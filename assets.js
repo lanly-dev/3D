@@ -79,13 +79,23 @@ function isInside(parent, child) {
 }
 
 /**
+ * Stored on an asset the user has *explicitly* unassigned. It must not be
+ * null: null means "no tag yet", and resolveWorkspace would immediately
+ * re-derive a workspace from the file's folder, silently undoing the
+ * unassign. The sentinel makes the user's choice stick.
+ */
+const UNASSIGNED = '__none__';
+
+/**
  * Work out which workspace a file belongs to.
  *
- * Prefers the explicit tag. Otherwise it matches the workspace folder — the
- * *most specific* (deepest) folder wins, so a project folder nested inside
- * another workspace's folder is not swallowed by its parent.
+ * Prefers the explicit tag (the UNASSIGNED sentinel included — an explicit
+ * unassign beats the folder guess). Otherwise it matches the workspace
+ * folder — the *most specific* (deepest) folder wins, so a project folder
+ * nested inside another workspace's folder is not swallowed by its parent.
  */
 function resolveWorkspace(explicitId, filePath) {
+  if (explicitId === UNASSIGNED) return null;
   if (explicitId) {
     const ws = workspaces.find(explicitId);
     if (ws) return ws.id;
@@ -155,13 +165,13 @@ function linkCode(codePath, meshId) {
   return record;
 }
 
-/** Move an asset to a workspace (or clear it with null). */
+/** Move an asset to a workspace; null explicitly unassigns it (sentinel). */
 function assign(id, workspaceId) {
   const assets = readStore();
   let updated = null;
   const next = assets.map((a) => {
     if (a.id !== id) return a;
-    updated = { ...a, workspaceId: workspaceId || null, updatedAt: Date.now() };
+    updated = { ...a, workspaceId: workspaceId || UNASSIGNED, updatedAt: Date.now() };
     return updated;
   });
   writeStore(next);
