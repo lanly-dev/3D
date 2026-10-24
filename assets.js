@@ -8,7 +8,8 @@
  *   { id, name, filePath, kind, ext, size, createdAt, updatedAt, meshId?, workspaceId? }
  *
  * kind: 'model' | 'blender-code' | 'other'
- * workspaceId: id of the owning workspace, or null for 'unassigned'.
+ * Workspace membership is NOT stored: a file belongs to whichever
+ * workspace's folder it physically sits in (see resolveWorkspace).
  */
 const { app } = require('electron');
 const fs = require('fs');
@@ -79,27 +80,13 @@ function isInside(parent, child) {
 }
 
 /**
- * Stored on an asset the user has *explicitly* unassigned. It must not be
- * null: null means "no tag yet", and resolveWorkspace would immediately
- * re-derive a workspace from the file's folder, silently undoing the
- * unassign. The sentinel makes the user's choice stick.
+ * Work out which workspace a file belongs to, purely from where it sits:
+ * the workspace whose folder contains it — the *most specific* (deepest)
+ * folder wins, so a project folder nested inside another workspace's
+ * folder is not swallowed by its parent. Null when it sits in no
+ * workspace folder ('unassigned').
  */
-const UNASSIGNED = '__none__';
-
-/**
- * Work out which workspace a file belongs to.
- *
- * Prefers the explicit tag (the UNASSIGNED sentinel included — an explicit
- * unassign beats the folder guess). Otherwise it matches the workspace
- * folder — the *most specific* (deepest) folder wins, so a project folder
- * nested inside another workspace's folder is not swallowed by its parent.
- */
-function resolveWorkspace(explicitId, filePath) {
-  if (explicitId === UNASSIGNED) return null;
-  if (explicitId) {
-    const ws = workspaces.find(explicitId);
-    if (ws) return ws.id;
-  }
+function resolveWorkspace(filePath) {
   let best = null;
   let bestLen = -1;
   for (const ws of workspaces.list()) {
@@ -119,7 +106,7 @@ function list(workspaceId) {
   for (const a of readStore()) {
     const exists = fs.existsSync(a.filePath);
     const rec = describe(a.filePath, a);
-    rec.workspaceId = resolveWorkspace(a.workspaceId, a.filePath);
+    rec.workspaceId = resolveWorkspace(a.filePath);
     rec.exists = exists;
     rec.id = a.id;
     out.push(rec);
@@ -135,13 +122,13 @@ function list(workspaceId) {
 }
 
 /** Register (or refresh) an asset for a file path. */
-function track(filePath, kind, workspaceId) {
+function track(filePath, kind, _workspaceId) {
   const assets = readStore();
   const abs = path.resolve(filePath);
   const existing = assets.find((a) => a.filePath === abs);
   const record = { id: existing ? existing.id : crypto.randomUUID(), ...describe(abs, existing) };
   if (kind) record.kind = kind;
-  record.workspaceId = resolveWorkspace(workspaceId, abs);
+  record.workspaceId = resolveWorkspace(abs);
   const next = existing
     ? assets.map((a) => (a.id === existing.id ? record : a))
     : [record, ...assets];
@@ -153,26 +140,94 @@ function track(filePath, kind, workspaceId) {
 function linkCode(codePath, meshId) {
   const assets = readStore();
   const abs = path.resolve(codePath);
-  const source = assets.find((a) => a.id === meshId) || null;
   const record = {
     id: crypto.randomUUID(),
     ...describe(abs, null),
     kind: 'blender-code',
     meshId,
-    workspaceId: source ? source.workspaceId : resolveWorkspace(null, abs),
+    workspaceId: resolveWorkspace(abs),
   };
   writeStore([record, ...assets.filter((a) => a.filePath !== abs)]);
   return record;
 }
 
-/** Move an asset to a workspace; null explicitly unassigns it (sentinel). */
+/** Where files that belong to no workspace live when moved to Unassigned. */
+function unassignedDir() {
+  return path.join(app.getPath('documents'), 'Hunyuan3D', 'Unassigned');
+}
+
+/** A free destination path in `dir`, uniquified as "name (1).ext" on clashes. */
+function uniqueDest(dir, fileName) {
+  let dest = path.join(dir, fileName);
+  if (!fs.existsSync(dest)) return dest;
+  const ext = path.extname(fileName);
+  const base = path.basename(fileName, ext);
+  for (let i = 1; ; i += 1) {
+    dest = path.join(dir, `${base} (${i})${ext}`);
+    if (!fs.existsSync(dest)) return dest;
+  }
+}
+
+function moveFile(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+  } catch (err) {
+    if (!err || err.code !== 'EXDEV') throw err;
+    // Different drive — copy across, then remove the original.
+    fs.copyFileSync(src, dest);
+    fs.unlinkSync(src);
+  }
+}
+
+/**
+ * Move an asset's file into a workspace's folder (or, with null, into the
+ * Unassigned folder). Membership follows the file, so this is the only way
+ * an asset changes workspace. A model's generated Blender script
+ * (<name>.blender.py) sits beside the mesh and moves along with it.
+ * Throws with a plain message when the move cannot happen.
+ */
 function assign(id, workspaceId) {
-  const assets = readStore();
+  const all = readStore();
+  const rec = all.find((a) => a.id === id);
+  if (!rec) return null;
+  const ws = workspaceId ? workspaces.find(workspaceId) : null;
+  if (workspaceId && !ws) throw new Error('That workspace no longer exists.');
+  const destDir = ws ? ws.folder : unassignedDir();
+  if (!destDir) throw new Error('That workspace has no folder set.');
+  if (!fs.existsSync(rec.filePath)) throw new Error('The file is missing from disk — cannot move it.');
+  fs.mkdirSync(destDir, { recursive: true });
+
+  const src = path.resolve(rec.filePath);
+  const srcDir = path.dirname(src);
+  const moves = new Map(); // old absolute path -> new absolute path
+  if (path.resolve(destDir).toLowerCase() !== srcDir.toLowerCase()) {
+    const dest = uniqueDest(destDir, path.basename(src));
+    moveFile(src, dest);
+    moves.set(src, dest);
+    if (classify(src) === 'model') {
+      const base = path.basename(src, path.extname(src));
+      const companion = path.join(srcDir, `${base}.blender.py`);
+      if (fs.existsSync(companion)) {
+        const compDest = uniqueDest(destDir, path.basename(companion));
+        moveFile(companion, compDest);
+        moves.set(companion, compDest);
+      }
+    }
+  }
+
+  const now = Date.now();
   let updated = null;
-  const next = assets.map((a) => {
-    if (a.id !== id) return a;
-    updated = { ...a, workspaceId: workspaceId || UNASSIGNED, updatedAt: Date.now() };
-    return updated;
+  const next = all.map((a) => {
+    const np = moves.get(path.resolve(a.filePath));
+    if (!np && a.id !== id) return a;
+    const r = {
+      ...a,
+      filePath: np || a.filePath,
+      workspaceId: resolveWorkspace(np || a.filePath),
+      updatedAt: now,
+    };
+    if (a.id === id) updated = r;
+    return r;
   });
   writeStore(next);
   return updated;
@@ -209,7 +264,7 @@ function findByPath(filePath) {
   const raw = assets.find((a) => a.filePath === abs);
   if (!raw) return null;
   return { ...describe(raw.filePath, raw), exists: fs.existsSync(raw.filePath), id: raw.id,
-    workspaceId: resolveWorkspace(raw.workspaceId, raw.filePath) };
+    workspaceId: resolveWorkspace(raw.filePath) };
 }
 
 /**
@@ -270,5 +325,6 @@ module.exports = {
   scanFolder,
   stats,
   storePath,
+  unassignedDir,
   MODEL_EXTS,
 };

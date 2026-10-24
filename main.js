@@ -686,9 +686,14 @@ function registerIpc() {
     return record;
   });
   ipcMain.handle('assets:assign', (_e, id, workspaceId) => {
-    const record = assets.assign(String(id || ''), workspaceId || null);
-    notifySidebar();
-    return record;
+    // 'assign' physically moves the file into the workspace's folder.
+    try {
+      const record = assets.assign(String(id || ''), workspaceId || null);
+      notifySidebar();
+      return { ok: true, record };
+    } catch (err) {
+      return { ok: false, message: err && err.message ? err.message : 'Move failed.' };
+    }
   });
   ipcMain.handle('assets:scan', (_e, folder) => {
     const target = folder || app.getPath('downloads');

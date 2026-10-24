@@ -42,7 +42,10 @@ stays bounded.
 ## Workspaces
 
 A workspace is a named project that owns a folder. The active one decides
-where downloads and generated code are written. Manage them from the sidebar
+where downloads and generated code are written. An asset belongs to a
+workspace purely because its file sits in that folder — an asset's
+**Move to…** action physically moves the file (to Unassigned it goes to
+`Documents/Hunyuan3D/Unassigned`). Manage workspaces from the sidebar
 dropdown, the **+** / **⋯** buttons, or **Menu → Workspaces**. Stored in
 `<userData>/workspaces.json`.
 

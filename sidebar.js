@@ -182,7 +182,7 @@ function renderList() {
     // Move this asset to another workspace.
     const assign = document.createElement('select');
     assign.className = 'assign';
-    assign.title = 'Move to workspace';
+    assign.title = 'Move this file into another workspace folder (Unassigned = Documents\\Hunyuan3D\\Unassigned)';
     const blank = document.createElement('option');
     blank.value = '';
     blank.textContent = 'Move to…';
@@ -203,8 +203,12 @@ function renderList() {
       const v = e.target.value;
       if (!v) return;
       const target = v === '__none__' ? null : v;
-      bridge.assign(a.id, target).then(() => {
-        setStatus(`Moved to ${target ? workspaceName(target) : 'Unassigned'}`);
+      bridge.assign(a.id, target).then((res) => {
+        if (res && res.ok === false) {
+          setStatus(res.message || 'Move failed');
+        } else {
+          setStatus(`File moved to ${target ? workspaceName(target) : 'Unassigned'}`);
+        }
         refresh();
       });
     });

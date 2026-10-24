@@ -1,10 +1,10 @@
 /**
  * Workspace registry (main process).
  *
- * A workspace is a named project that groups assets and owns a folder:
- * downloads land in the active workspace's folder, and MeshCoder output
- * is written there too. Assets are tagged with a workspace id so the
- * sidebar can filter by project.
+ * A workspace is a named project that owns a folder: downloads land in
+ * the active workspace's folder, and MeshCoder output is written there
+ * too. An asset belongs to a workspace purely because its file sits in
+ * that folder — moving the file is how an asset changes workspace.
  *
  * Storage: <userData>/workspaces.json
  *   {
