@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('api', {
   remove: (id) => ipcRenderer.invoke('assets:remove', id),
   reveal: (filePath) => ipcRenderer.invoke('assets:reveal', filePath),
   open: (filePath) => ipcRenderer.invoke('assets:open', filePath),
+  view: (id) => ipcRenderer.invoke('assets:view', id),
+  rename: (id, name) => ipcRenderer.invoke('assets:rename', id, name),
+  copy: (text) => ipcRenderer.invoke('sidebar:copy', text),
   convert: (id) => ipcRenderer.invoke('assets:convert', id),
 
   // Compounding engine

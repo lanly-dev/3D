@@ -494,7 +494,11 @@ $('refresh').addEventListener('click', () => {
 $('status').addEventListener('click', () => {
   const el = $('status');
   const text = el.textContent || '';
-  if (!text || text === 'Copied' || typeof bridge.copy !== 'function') return;
+  if (!text || text === 'Copied') return;
+  if (typeof bridge.copy !== 'function') {
+    el.textContent = 'Copy unavailable — restart the app to load the new sidebar';
+    return;
+  }
   bridge.copy(text).then(() => {
     el.textContent = 'Copied';
     setTimeout(() => { if (el.textContent === 'Copied') el.textContent = text; }, 1200);
