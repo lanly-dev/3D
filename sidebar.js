@@ -185,7 +185,7 @@ function renderList() {
     assign.title = 'Move this file into another workspace folder (Unassigned = Documents\\Hunyuan3D\\Unassigned)';
     const blank = document.createElement('option');
     blank.value = '';
-    blank.textContent = 'Move to…';
+    blank.textContent = '📁';
     blank.selected = true;
     assign.appendChild(blank);
     for (const w of state.workspaces) {
@@ -214,16 +214,16 @@ function renderList() {
     });
 
     const reveal = document.createElement('button');
-    reveal.className = 'btn';
-    reveal.textContent = 'Reveal';
+    reveal.className = 'btn icon-btn';
+    reveal.textContent = '📂';
     reveal.title = 'Show this file in Explorer';
     reveal.addEventListener('click', (e) => {
       e.stopPropagation();
       bridge.reveal(a.filePath).then((ok) => setStatus(ok ? 'Revealed' : 'File not found'));
     });
     const open = document.createElement('button');
-    open.className = 'btn';
-    open.textContent = 'Open';
+    open.className = 'btn icon-btn';
+    open.textContent = '↗';
     open.title = 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -233,8 +233,8 @@ function renderList() {
 
     if (a.kind === 'model') {
       const conv = document.createElement('button');
-      conv.className = 'btn';
-      conv.textContent = 'To Blender';
+      conv.className = 'btn icon-btn';
+      conv.textContent = '🐍';
       conv.title = 'Convert this model into editable Blender Python code with MeshCoder';
       conv.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -244,8 +244,8 @@ function renderList() {
     }
 
     const del = document.createElement('button');
-    del.className = 'btn';
-    del.textContent = 'Untrack';
+    del.className = 'btn icon-btn';
+    del.textContent = '✕';
     del.title = 'Stop tracking this asset — the file itself is NOT deleted';
     del.addEventListener('click', (e) => {
       e.stopPropagation();

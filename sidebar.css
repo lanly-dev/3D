@@ -370,9 +370,19 @@ body.collapsed .grip { width: 4px; }
 }
 .item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .item-actions .btn { padding: 3px 8px; font-size: 11px; }
-/* The Move-to select must be allowed to shrink/wrap — a <select> otherwise
-   keeps its intrinsic width and pushes the row past the card edge. */
-.item-actions .assign { flex: 1 1 96px; min-width: 0; max-width: none; }
+/* Icon buttons for the per-asset actions (tooltips carry the meaning). */
+.item-actions .icon-btn {
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* The Move-to select shows only its folder icon when collapsed — the
+   workspace names still appear in the dropdown itself. */
+.item-actions .assign { flex: 0 0 auto; width: 44px; padding: 3px 2px; max-width: none; }
 
 .empty {
   color: var(--fg-dim);
