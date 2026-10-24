@@ -69,6 +69,84 @@ const SIDEBAR_COLLAPSED_WIDTH = 36;
 let lastDownloadPath = null;
 let converting = false;
 
+/* ------------------------------------------------------------------ */
+/* Live conversion progress in the sidebar status bar. A dedicated    */
+/* lightweight channel (not notifySidebar) so the 1-second elapsed    */
+/* tick never triggers a full sidebar re-render. The full output is   */
+/* kept in memory; on failure the real traceback is extracted for     */
+/* the status line and the whole log is written to userData.          */
+/* ------------------------------------------------------------------ */
+
+const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [] };
+
+function pushSidebarStatus(text) {
+  if (sidebarView && !sidebarView.webContents.isDestroyed()) {
+    sidebarView.webContents.send('sidebar:status', String(text));
+  }
+}
+
+function formatElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function conversionStatusText() {
+  const phaseLabel = conversionUi.phase === 'sampling' ? 'Sampling points' : 'Generating code';
+  const last = conversionUi.lines.length ? conversionUi.lines[conversionUi.lines.length - 1] : '';
+  const tail = last && last.length <= 90 ? ` — ${last}` : '';
+  return `MeshCoder · ${phaseLabel}: ${conversionUi.file} · ${formatElapsed(Date.now() - conversionUi.startedAt)}${tail}`;
+}
+
+/** Options handed to meshcoder.convertToCode so progress streams here. */
+function conversionProgressOpts() {
+  return {
+    onPhase: (phase) => {
+      conversionUi.phase = phase;
+      pushSidebarStatus(conversionStatusText());
+    },
+    onLog: (line) => {
+      conversionUi.lines.push(line);
+      if (conversionUi.lines.length > 400) conversionUi.lines.splice(0, conversionUi.lines.length - 400);
+    },
+  };
+}
+
+function startConversionUi(filePath) {
+  conversionUi.file = path.basename(filePath);
+  conversionUi.phase = 'sampling';
+  conversionUi.startedAt = Date.now();
+  conversionUi.lines = [];
+  pushSidebarStatus(conversionStatusText());
+  clearInterval(conversionUi.timer);
+  conversionUi.timer = setInterval(() => {
+    if (converting) pushSidebarStatus(conversionStatusText());
+  }, 1000);
+}
+
+function stopConversionUi() {
+  clearInterval(conversionUi.timer);
+  conversionUi.timer = null;
+}
+
+/**
+ * The part of a failed run worth showing: the traceback (warnings and
+ * progress noise sit above it), or the last lines when there is none.
+ * Also writes the full log to userData and returns its path.
+ */
+function conversionFailureReport(err) {
+  const text = conversionUi.lines.join('\n');
+  let logPath = '';
+  try {
+    logPath = path.join(app.getPath('userData'), 'meshcoder-last-conversion.log');
+    fs.writeFileSync(logPath, `${new Date().toISOString()}\n${text}\n${err && err.stack ? err.stack : ''}`);
+  } catch {
+    logPath = '';
+  }
+  const idx = text.lastIndexOf('Traceback (most recent call last)');
+  const excerpt = (idx >= 0 ? text.slice(idx) : text.slice(-1200)).trim() || String(err && err.message ? err.message : err);
+  return { excerpt, logPath };
+}
+
 /** Main window + its two views (sidebar + site). */
 let mainWindow = null;
 let sidebarView = null;
@@ -995,7 +1073,10 @@ function toggleDevTools() {
 
 async function convertLastDownload() {
   const win = focusedWindow();
-  if (converting) return;
+  if (converting) {
+    pushSidebarStatus(conversionStatusText());
+    return;
+  }
   if (!lastDownloadPath) {
     await dialog.showMessageBox(win, {
       type: 'info',
@@ -1006,6 +1087,7 @@ async function convertLastDownload() {
   }
   if (!(await ensureMeshcoder(win))) return;
   converting = true;
+  startConversionUi(lastDownloadPath);
   new Notification({
     title: 'Hunyuan3D',
     body: `MeshCoder: converting ${path.basename(lastDownloadPath)}…`,
@@ -1015,7 +1097,7 @@ async function convertLastDownload() {
     const meshAsset = assets.findByPath(lastDownloadPath);
     const owner = meshAsset && meshAsset.workspaceId ? workspaces.find(meshAsset.workspaceId) : null;
     const outDir = owner && owner.folder ? owner.folder : path.dirname(lastDownloadPath);
-    const codePath = await meshcoder.convertToCode(lastDownloadPath, outDir);
+    const codePath = await meshcoder.convertToCode(lastDownloadPath, outDir, conversionProgressOpts());
     // Register the generated script as an asset linked to its source mesh.
     const mesh = assets.track(lastDownloadPath, 'model', owner ? owner.id : null);
     assets.linkCode(codePath, mesh.id);
@@ -1025,13 +1107,16 @@ async function convertLastDownload() {
     new Notification({ title: 'Hunyuan3D', body: `Blender code saved: ${path.basename(codePath)}` }).show();
     shell.showItemInFolder(codePath);
   } catch (err) {
+    const report = conversionFailureReport(err);
+    pushSidebarStatus(`MeshCoder failed (${conversionUi.file}) — click to copy the traceback\n${report.excerpt}`);
     await dialog.showMessageBox(win, {
       type: 'error',
       message: 'MeshCoder conversion failed',
-      detail: String(err && err.message ? err.message : err),
+      detail: `${report.excerpt}${report.logPath ? `\n\nFull log: ${report.logPath}` : ''}`,
     });
   } finally {
     converting = false;
+    stopConversionUi();
   }
 }
 
@@ -1692,17 +1777,18 @@ function registerIpc() {
     if (!found) return { message: 'Asset not found' };
     // Re-resolve the workspace (it may have been inferred from the folder).
     const asset = assets.findByPath(found.filePath) || found;
-    if (converting) return { message: 'A conversion is already running' };
+    if (converting) return { message: conversionStatusText() };
     if (!(await ensureMeshcoder(focusedWindow()))) {
       return { message: 'MeshCoder is not set up — see the dialog, or Tools → Detect MeshCoder automatically' };
     }
     converting = true;
+    startConversionUi(asset.filePath);
     notifySidebar();
     try {
       // Write the generated script into the owning workspace folder.
       const owner = asset.workspaceId ? workspaces.find(asset.workspaceId) : null;
       const outDir = owner && owner.folder ? owner.folder : path.dirname(asset.filePath);
-      const codePath = await meshcoder.convertToCode(asset.filePath, outDir);
+      const codePath = await meshcoder.convertToCode(asset.filePath, outDir, conversionProgressOpts());
       const mesh = assets.track(asset.filePath, 'model', owner ? owner.id : null);
       assets.linkCode(codePath, mesh.id);
       compounding.harvest(codePath, path.basename(asset.filePath));
@@ -1715,10 +1801,14 @@ function registerIpc() {
       return { message: `Saved ${path.basename(codePath)}` };
     } catch (err) {
       const detail = String(err && err.message ? err.message : err);
+      const report = conversionFailureReport(err);
       new Notification({ title: 'Hunyuan3D', body: `MeshCoder failed: ${detail.slice(0, 120)}` }).show();
-      return { message: `Failed: ${detail.slice(0, 200)}` };
+      return {
+        message: `MeshCoder failed (${path.basename(asset.filePath)}) — click to copy the traceback\n${report.excerpt}${report.logPath ? `\nFull log: ${report.logPath}` : ''}`,
+      };
     } finally {
       converting = false;
+      stopConversionUi();
       notifySidebar();
     }
   });

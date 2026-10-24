@@ -43,6 +43,9 @@ contextBridge.exposeInMainWorld('api', {
   onUpdate: (cb) => {
     ipcRenderer.on('assets:updated', (_e, payload) => cb(payload));
   },
+  onStatus: (cb) => {
+    ipcRenderer.on('sidebar:status', (_e, text) => cb(text));
+  },
   onVisibility: (cb) => {
     ipcRenderer.on('sidebar:visibility', (_e, visible) => cb(visible));
   },

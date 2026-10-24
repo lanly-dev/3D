@@ -333,7 +333,10 @@ function run(cmd, args, opts = {}) {
  * If `outDir` is given, the script is written there instead (used by the
  * active workspace so generated code lands in the project folder).
  */
-async function convertToCode(meshPath, outDir) {
+async function convertToCode(meshPath, outDir, opts = {}) {
+  const { onLog, onPhase, registerChild } = opts;
+  // With a log sink, stream the child's output live; without one, buffer it.
+  const exec = onLog ? (cmd, args, runOpts) => runStreaming(cmd, args, { onLog, registerChild, ...runOpts }) : run;
   let cfg = loadConfig();
   if (!isConfigured(cfg)) {
     // One automatic attempt before giving up: a clone in the usual places
@@ -359,11 +362,13 @@ async function convertToCode(meshPath, outDir) {
 
   try {
     // 1. mesh -> point-cloud NPZ (trimesh lives in the MeshCoder env already)
-    await run(cfg.python, [path.join(__dirname, 'mesh-to-npz.py'), meshPath, npzPath]);
+    if (onPhase) onPhase('sampling');
+    await exec(cfg.python, [path.join(__dirname, 'mesh-to-npz.py'), meshPath, npzPath]);
 
     // 2. NPZ -> Blender code (MeshCoder single-GPU inference)
+    if (onPhase) onPhase('generating');
     const modelDir = path.join(cfg.home, 'llama-3-models');
-    await run(
+    await exec(
       cfg.python,
       [
         path.join(cfg.home, INFERENCE_REL),

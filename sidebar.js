@@ -589,6 +589,11 @@ window.addEventListener('mouseup', () => {
 
 bridge.onUpdate(() => refresh());
 
+// Live progress (conversion phases + elapsed time) pushed by main.
+if (typeof bridge.onStatus === 'function') {
+  bridge.onStatus((text) => setStatus(text));
+}
+
 window.addEventListener('error', (e) => console.error('sidebar error:', e.message));
 
 refresh().catch((e) => {
