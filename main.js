@@ -28,6 +28,7 @@ const {
   app,
   BrowserWindow,
   WebContentsView,
+  webContents,
   session,
   Menu,
   shell,
@@ -956,6 +957,18 @@ function focusedWebContents() {
   return w ? w.webContents : null;
 }
 
+/** F12: toggle DevTools on whichever view or window currently has focus. */
+function toggleDevTools() {
+  const wc = webContents.getFocusedWebContents();
+  // If DevTools itself has focus, fall through to the site view instead of
+  // trying to open DevTools for DevTools.
+  if (wc && !wc.isDestroyed() && !wc.getURL().startsWith('devtools://')) {
+    wc.toggleDevTools();
+    return;
+  }
+  if (siteView && !siteView.webContents.isDestroyed()) siteView.webContents.toggleDevTools();
+}
+
 async function convertLastDownload() {
   const win = focusedWindow();
   if (converting) return;
@@ -1059,6 +1072,53 @@ async function openMeshcoderConfig() {
   await shell.openPath(file);
 }
 
+/**
+ * Move an asset's file to the Recycle Bin (with confirmation) and drop its
+ * row. A model's companion Blender script moves along with it, and its
+ * row goes too. A file already missing from disk just drops its row.
+ */
+async function deleteAssetFile(id) {
+  const found = assets.find(String(id || ''));
+  if (!found) return;
+  const win = focusedWindow();
+  if (!fs.existsSync(found.filePath)) {
+    assets.remove(found.id);
+    thumbs.remove(found.id);
+    notifySidebar();
+    return;
+  }
+  const ext = path.extname(found.filePath).toLowerCase();
+  const compPath = assets.MODEL_EXTS.includes(ext)
+    ? path.join(path.dirname(found.filePath), `${path.basename(found.filePath, ext)}.blender.py`)
+    : null;
+  const compRec = compPath ? assets.findByPath(compPath) : null;
+  const res = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Delete file', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Delete ${path.basename(found.filePath)}?`,
+    detail: 'The file will be moved to the Recycle Bin, and the asset will be removed from the list.' +
+      (compPath && fs.existsSync(compPath) ? ' Its companion Blender script is moved along with it.' : ''),
+  });
+  if (res.response !== 0) return;
+  try {
+    await shell.trashItem(found.filePath);
+    if (compPath && fs.existsSync(compPath)) await shell.trashItem(compPath);
+    if (lastDownloadPath === found.filePath) lastDownloadPath = null;
+    assets.remove(found.id);
+    if (compRec) assets.remove(compRec.id);
+    thumbs.remove(found.id);
+    notifySidebar();
+  } catch (err) {
+    await dialog.showMessageBox(win, {
+      type: 'error',
+      message: 'Could not delete file',
+      detail: String(err && err.message ? err.message : err),
+    });
+  }
+}
+
 async function detectMeshcoder() {
   const win = focusedWindow();
   const { cfg, newly } = meshcoder.detectAndSave();
@@ -1108,6 +1168,7 @@ function buildMenu() {
           checked: Boolean(settings.translateToEnglish),
           click: () => toggleTranslate(),
         },
+        { label: 'Toggle Developer Tools', accelerator: 'F12', click: () => toggleDevTools() },
         { type: 'separator' },
         {
           label: 'Clear session && restart',
@@ -1318,6 +1379,25 @@ function registerIpc() {
     assets.remove(String(id || ''));
     thumbs.remove(String(id || ''));
     notifySidebar();
+    return true;
+  });
+  // Right-click menu on an asset row. No coordinates are passed: popup
+  // without a position opens at the cursor, which is already on the row.
+  ipcMain.handle('assets:contextMenu', (_e, id) => {
+    const found = assets.find(String(id || ''));
+    if (!found) return false;
+    const menu = Menu.buildFromTemplate([
+      { label: 'Delete file', click: () => deleteAssetFile(found.id) },
+      {
+        label: 'Remove from list',
+        click: () => {
+          assets.remove(found.id);
+          thumbs.remove(found.id);
+          notifySidebar();
+        },
+      },
+    ]);
+    menu.popup({ window: mainWindow });
     return true;
   });
   ipcMain.handle('assets:reveal', (_e, filePath) => {

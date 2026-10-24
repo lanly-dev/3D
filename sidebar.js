@@ -221,6 +221,14 @@ function renderList() {
     const el = document.createElement('div');
     el.className = 'item' + (a.exists ? '' : ' missing');
     el.title = a.filePath;
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (typeof bridge.assetMenu !== 'function') {
+        setStatus('Context menu unavailable — restart the app to load the new sidebar');
+        return;
+      }
+      bridge.assetMenu(a.id);
+    });
 
     const top = document.createElement('div');
     top.className = 'item-top';

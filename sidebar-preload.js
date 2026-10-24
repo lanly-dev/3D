@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   open: (filePath) => ipcRenderer.invoke('assets:open', filePath),
   view: (id) => ipcRenderer.invoke('assets:view', id),
   rename: (id, name) => ipcRenderer.invoke('assets:rename', id, name),
+  assetMenu: (id) => ipcRenderer.invoke('assets:contextMenu', id),
   copy: (text) => ipcRenderer.invoke('sidebar:copy', text),
   convert: (id) => ipcRenderer.invoke('assets:convert', id),
 
