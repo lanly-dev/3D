@@ -32,9 +32,9 @@ accumulated parts; **Compound build** writes `<workspace>.compound.py`, a
 Blender 4.x script that imports the tracked meshes and re-executes the
 previously generated scripts, so each build accumulates on the last.
 
-- **Menu** — *Tools → Compound active workspace*, *Tools → Reveal compounding store*.
+- **Menu** — *Tools → Compound active workspace*, *Tools → Reveal parts library file*.
 - **Sidebar** — the *Compounding engine* panel, with **Compound build** and
-  **Store** buttons.
+  **Library file** buttons.
 
 Compound scripts are excluded from later builds' reuse chain, so the chain
 stays bounded.
@@ -55,7 +55,7 @@ dropdown, the **+** / **⋯** buttons, or **Menu → Workspaces**. Stored in
 | `<userData>/compounding.json` | Part library + build history |
 | `<userData>/layout.json` | Sidebar width + visibility |
 
-**View → Reveal asset store** opens the folder. Untracking an asset never
+**View → Reveal asset index file** opens the folder. Untracking an asset never
 touches the file on disk.
 
 ## MeshCoder setup (optional)

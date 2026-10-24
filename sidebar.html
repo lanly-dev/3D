@@ -28,32 +28,32 @@
     </section>
 
     <section class="stats" id="stats">
-      <div class="stat"><b id="stat-total">0</b><span>Assets</span></div>
-      <div class="stat"><b id="stat-models">0</b><span>Models</span></div>
-      <div class="stat"><b id="stat-codes">0</b><span>Scripts</span></div>
-      <div class="stat"><b id="stat-size">0 B</b><span>On disk</span></div>
+      <div class="stat" title="Total assets tracked in this workspace"><b id="stat-total">0</b><span>Assets</span></div>
+      <div class="stat" title="3D model files (GLB/OBJ/…)"><b id="stat-models">0</b><span>Models</span></div>
+      <div class="stat" title="Generated Blender Python scripts"><b id="stat-codes">0</b><span>Scripts</span></div>
+      <div class="stat" title="Total size of the tracked files on disk"><b id="stat-size">0 B</b><span>On disk</span></div>
     </section>
 
     <section class="toolbar">
-      <input id="search" type="search" placeholder="Filter assets…" />
-      <select id="kind">
+      <input id="search" type="search" placeholder="Filter assets…" title="Filter the asset list by name" />
+      <select id="kind" title="Show only this kind of asset">
         <option value="all">All</option>
         <option value="model">Models</option>
         <option value="blender-code">Blender code</option>
         <option value="other">Other</option>
       </select>
-      <button id="scan" class="btn" title="Scan Downloads folder for models">Scan</button>
+      <button id="scan" class="btn" title="Scan the Downloads folder for model files and start tracking them">Scan</button>
     </section>
 
     <section class="compound" id="compound">
       <div class="compound-head">
         <span class="compound-title">Compounding engine</span>
-        <span class="compound-count" id="compound-count">0 parts</span>
+        <span class="compound-count" id="compound-count" title="Distinct parts harvested from your converted Blender scripts">0 parts</span>
       </div>
       <div class="compound-parts" id="compound-parts"></div>
       <div class="compound-actions">
-        <button id="compound-build" class="btn primary" title="Re-use generated scripts and tracked meshes">Compound build</button>
-        <button id="compound-reveal" class="btn ghost" title="Open the compounding store">Store</button>
+        <button id="compound-build" class="btn primary" title="Build one Blender script for this workspace that re-uses its tracked meshes and generated part scripts">Compound build</button>
+        <button id="compound-reveal" class="btn ghost" title="Reveal the parts library file (compounding.json) in Explorer — it's just a data file, not a shop">Library file</button>
       </div>
     </section>
 
@@ -61,7 +61,7 @@
 
     <footer class="foot">
       <span id="status">Ready</span>
-      <button id="refresh" class="btn ghost">Refresh</button>
+      <button id="refresh" class="btn ghost" title="Reload the asset list from disk">Refresh</button>
     </footer>
 
     <div class="modal-backdrop" id="ws-modal" hidden>
@@ -83,7 +83,7 @@
           <textarea id="ws-notes" rows="3" placeholder="Optional notes about this project"></textarea>
         </label>
         <div class="modal-actions">
-          <button id="ws-delete" class="btn danger">Delete</button>
+          <button id="ws-delete" class="btn danger" title="Delete this workspace — its assets keep their files and just become unassigned">Delete</button>
           <span class="spacer"></span>
           <button id="ws-cancel" class="btn ghost">Cancel</button>
           <button id="ws-save" class="btn primary">Save</button>

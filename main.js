@@ -609,7 +609,7 @@ function buildMenu() {
           },
         },
         {
-          label: 'Reveal asset store',
+          label: 'Reveal asset index file',
           click: () => shell.showItemInFolder(assets.storePath()),
         },
       ],
@@ -648,7 +648,7 @@ function buildMenu() {
         },
         { type: 'separator' },
         {
-          label: 'Reveal workspace store',
+          label: 'Reveal workspaces file',
           click: () => shell.showItemInFolder(workspaces.storePath()),
         },
       ],
@@ -667,7 +667,7 @@ function buildMenu() {
           click: () => compoundActiveWorkspace(),
         },
         {
-          label: 'Reveal compounding store',
+          label: 'Reveal parts library file',
           click: () => shell.showItemInFolder(compounding.storePath()),
         },
       ],

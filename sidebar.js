@@ -212,6 +212,7 @@ function renderList() {
     const reveal = document.createElement('button');
     reveal.className = 'btn';
     reveal.textContent = 'Reveal';
+    reveal.title = 'Show this file in Explorer';
     reveal.addEventListener('click', (e) => {
       e.stopPropagation();
       bridge.reveal(a.filePath).then((ok) => setStatus(ok ? 'Revealed' : 'File not found'));
@@ -219,6 +220,7 @@ function renderList() {
     const open = document.createElement('button');
     open.className = 'btn';
     open.textContent = 'Open';
+    open.title = 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
       bridge.open(a.filePath).then((ok) => setStatus(ok ? 'Opened' : 'Cannot open this file'));
@@ -229,6 +231,7 @@ function renderList() {
       const conv = document.createElement('button');
       conv.className = 'btn';
       conv.textContent = 'To Blender';
+      conv.title = 'Convert this model into editable Blender Python code with MeshCoder';
       conv.addEventListener('click', (e) => {
         e.stopPropagation();
         bridge.convert(a.id).then((res) => setStatus(res.message || 'Done'));
@@ -239,6 +242,7 @@ function renderList() {
     const del = document.createElement('button');
     del.className = 'btn';
     del.textContent = 'Untrack';
+    del.title = 'Stop tracking this asset — the file itself is NOT deleted';
     del.addEventListener('click', (e) => {
       e.stopPropagation();
       bridge.remove(a.id).then(() => refresh());
@@ -381,7 +385,7 @@ $('compound-build').addEventListener('click', async () => {
 
 $('compound-reveal').addEventListener('click', () => {
   bridge.revealCompound('').catch(() => {});
-  setStatus('Compounding store is in the app data folder');
+  setStatus('Parts library file is in the app data folder');
 });
 
 // --- collapsed state comes from the main process ---
