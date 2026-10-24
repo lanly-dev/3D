@@ -546,14 +546,32 @@ function saveLayout() {
 /**
  * Thumbnail worker: renders one model in a hidden window and caches the
  * capture under <userData>/thumbs/<asset-id>.png. Jobs run one at a time
- * so a big library does not spawn a storm of windows; each completion
- * notifies the sidebar, so thumbnails appear progressively. A failed
+ * so a big library does not spawn a storm of windows; completions notify
+ * the sidebar (debounced — see notifySidebarSoon), so thumbnails appear
+ * progressively without hammering the main process. A failed
  * render is recorded against the file's mtime and retried only when the
  * file changes.
  */
 const thumbQueue = new Set();
 let thumbWorking = false;
 let thumbCurrent = null;
+let thumbNotifyTimer = null;
+
+/**
+ * Sidebar refresh for thumbnail completions, debounced: a catch-up run
+ * can finish a thumbnail every second or two, and each full sidebar
+ * refresh costs a sync list rebuild on the main process — unbatched,
+ * those bursts land on the same UI thread that tracks the native menu
+ * bar, so menu hover stutters. At most one refresh per 800ms, plus one
+ * final refresh when the queue drains (pumpThumbQueue flushes).
+ */
+function notifySidebarSoon() {
+  if (thumbNotifyTimer) return;
+  thumbNotifyTimer = setTimeout(() => {
+    thumbNotifyTimer = null;
+    notifySidebar();
+  }, 800);
+}
 
 function queueThumb(asset) {
   if (!asset || asset.id === thumbCurrent) return;
@@ -578,6 +596,12 @@ async function pumpThumbQueue() {
   } finally {
     thumbWorking = false;
     thumbCurrent = null;
+    // Land the last thumbnails even if the debounce is still pending.
+    if (thumbNotifyTimer) {
+      clearTimeout(thumbNotifyTimer);
+      thumbNotifyTimer = null;
+    }
+    notifySidebar();
   }
 }
 
@@ -610,7 +634,7 @@ async function renderThumb(id) {
       fs.mkdirSync(thumbs.dir(), { recursive: true });
       fs.writeFileSync(thumbs.thumbPath(id), img.toPNG());
       thumbs.set(id, fs.statSync(asset.filePath).mtimeMs);
-      notifySidebar();
+      notifySidebarSoon();
     } else if (fs.existsSync(asset.filePath)) {
       thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
     }
