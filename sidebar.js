@@ -232,6 +232,10 @@ function renderList() {
       e.stopPropagation();
       bridge.view(a.id).then((res) => {
         if (res && res.ok === false) setStatus(res.message || 'Cannot open this file');
+      }).catch((err) => {
+        // e.g. running an older build with no 'assets:view' handler — say
+        // so instead of silently doing nothing.
+        setStatus('Viewer failed: ' + (err && err.message ? err.message : err));
       });
     });
     actions.append(reveal, open, move);
