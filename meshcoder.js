@@ -334,7 +334,7 @@ function run(cmd, args, opts = {}) {
  * active workspace so generated code lands in the project folder).
  */
 async function convertToCode(meshPath, outDir, opts = {}) {
-  const { onLog, onPhase, registerChild } = opts;
+  const { onLog, onPhase, registerChild, onSyntaxIssue } = opts;
   // With a log sink, stream the child's output live; without one, buffer it.
   const exec = onLog ? (cmd, args, runOpts) => runStreaming(cmd, args, { onLog, registerChild, ...runOpts }) : run;
   let cfg = loadConfig();
@@ -402,7 +402,65 @@ async function convertToCode(meshPath, outDir, opts = {}) {
   if (!fs.existsSync(codePath)) {
     throw new Error('MeshCoder finished but produced no code file.');
   }
+
+  // MeshCoder's output is model-generated code and is not guaranteed to
+  // be valid Python (a merged create_curve call with mismatched
+  // brackets shipped once). Parse it now so a broken line is flagged
+  // at conversion time instead of inside Blender later. A syntax issue
+  // does not fail the conversion — the file is still the model's
+  // output, it just needs a hand fix before Blender can run it.
+  const issue = await checkSyntax(cfg.python, codePath);
+  if (issue) {
+    if (onLog) onLog(`Syntax check: line ${issue.line} — ${issue.message}`);
+    if (onSyntaxIssue) onSyntaxIssue(issue);
+  }
   return codePath;
+}
+
+const SYNTAX_CHECK_SRC = [
+  'import ast, sys',
+  'src = open(sys.argv[1], encoding="utf-8").read()',
+  'try:',
+  '    ast.parse(src)',
+  'except SyntaxError as e:',
+  '    print("LINE", e.lineno or 0)',
+  '    print("MSG", e.msg or "syntax error")',
+  '    print("TEXT", (e.text or "").strip())',
+  '    sys.exit(3)',
+].join('\n');
+
+/**
+ * Parse a generated Blender script with the MeshCoder env's python
+ * (ast only — nothing is executed or imported). Resolves with null
+ * when the file parses, or { line, message, text } for the first
+ * syntax error. A checker failure (python missing, odd exit) also
+ * resolves null — the check must never break a conversion.
+ */
+function checkSyntax(python, codePath) {
+  return new Promise((resolve) => {
+    let out = '';
+    let child;
+    try {
+      child = spawn(python, ['-c', SYNTAX_CHECK_SRC, codePath], { windowsHide: true });
+    } catch {
+      return resolve(null);
+    }
+    child.stdout.on('data', (d) => {
+      out += d;
+    });
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => {
+      if (code === 0) return resolve(null);
+      const get = (key) => {
+        const m = out.match(new RegExp(`^${key} (.*)$`, 'm'));
+        return m ? m[1].trim() : '';
+      };
+      const line = Number(get('LINE')) || 0;
+      const message = get('MSG');
+      if (!line && !message) return resolve(null); // the checker itself failed — stay silent
+      resolve({ line, message: message || 'syntax error', text: get('TEXT') });
+    });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -780,4 +838,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };

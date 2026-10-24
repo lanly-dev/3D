@@ -77,7 +77,7 @@ let converting = false;
 /* the status line and the whole log is written to userData.          */
 /* ------------------------------------------------------------------ */
 
-const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [] };
+const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null };
 
 function pushSidebarStatus(text) {
   if (sidebarView && !sidebarView.webContents.isDestroyed()) {
@@ -108,6 +108,9 @@ function conversionProgressOpts() {
       conversionUi.lines.push(line);
       if (conversionUi.lines.length > 400) conversionUi.lines.splice(0, conversionUi.lines.length - 400);
     },
+    onSyntaxIssue: (issue) => {
+      conversionUi.syntaxIssue = issue;
+    },
   };
 }
 
@@ -116,6 +119,7 @@ function startConversionUi(filePath) {
   conversionUi.phase = 'sampling';
   conversionUi.startedAt = Date.now();
   conversionUi.lines = [];
+  conversionUi.syntaxIssue = null;
   pushSidebarStatus(conversionStatusText());
   clearInterval(conversionUi.timer);
   conversionUi.timer = setInterval(() => {
@@ -1105,6 +1109,12 @@ async function convertLastDownload() {
     compounding.harvest(codePath, path.basename(lastDownloadPath));
     notifySidebar();
     new Notification({ title: 'Hunyuan3D', body: `Blender code saved: ${path.basename(codePath)}` }).show();
+    if (conversionUi.syntaxIssue) {
+      const si = conversionUi.syntaxIssue;
+      pushSidebarStatus(
+        `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed (click to copy)${si.text ? `\n${si.text}` : ''}`
+      );
+    }
     shell.showItemInFolder(codePath);
   } catch (err) {
     const report = conversionFailureReport(err);
@@ -1798,7 +1808,12 @@ function registerIpc() {
         body: `Blender code saved: ${path.basename(codePath)}`,
       }).show();
       shell.showItemInFolder(codePath);
-      return { message: `Saved ${path.basename(codePath)}` };
+      const si = conversionUi.syntaxIssue;
+      return {
+        message: si
+          ? `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed${si.text ? `\n${si.text}` : ''}`
+          : `Saved ${path.basename(codePath)}`,
+      };
     } catch (err) {
       const detail = String(err && err.message ? err.message : err);
       const report = conversionFailureReport(err);

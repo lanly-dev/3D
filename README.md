@@ -116,7 +116,10 @@ uses conda), and download the checkpoints into
 torch + trimesh and save them to the config.
 
 Then use **Tools → Convert last download to Blender code**, or the **To
-Blender** button on a mesh row.
+Blender** button on a mesh row. After each conversion the app parses
+the generated script and flags any syntax error (with its line) in the
+status bar — MeshCoder's output is model-generated and occasionally
+contains a malformed line that Blender would reject.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
