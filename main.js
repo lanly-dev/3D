@@ -1181,7 +1181,11 @@ function registerIpc() {
   ipcMain.handle('assets:view', (_e, id) => {
     const found = assets.find(String(id || ''));
     if (!found || !fs.existsSync(found.filePath)) return { ok: false, message: 'File not found' };
-    if (found.kind === 'model') {
+    // Route by extension, not just the stored kind: a record tracked before
+    // kinds existed (or re-tracked from a stale entry) must still open its
+    // .glb in the viewer instead of falling through to the default app.
+    const ext = path.extname(found.filePath).toLowerCase();
+    if (found.kind === 'model' || assets.MODEL_EXTS.includes(ext)) {
       openViewer(found.filePath);
       return { ok: true };
     }

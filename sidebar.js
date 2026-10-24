@@ -227,11 +227,16 @@ function renderList() {
     const open = document.createElement('button');
     open.className = 'btn icon-btn';
     open.innerHTML = icon(ICONS.open);
-    open.title = a.kind === 'model' ? 'View in the in-app 3D viewer' : 'Open this file with its default app';
+    // Same rule as the main process: a model extension opens in the viewer
+    // even if the stored kind is stale.
+    const isModel = a.kind === 'model' || /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(a.filePath || '');
+    open.title = isModel ? 'View in the in-app 3D viewer' : 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
       bridge.view(a.id).then((res) => {
-        if (res && res.ok === false) setStatus(res.message || 'Cannot open this file');
+        if (!res) setStatus('Viewer: no response');
+        else if (res.ok === false) setStatus(res.message || 'Cannot open this file');
+        else setStatus('Opened');
       }).catch((err) => {
         // e.g. running an older build with no 'assets:view' handler — say
         // so instead of silently doing nothing.
