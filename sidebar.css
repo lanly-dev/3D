@@ -193,20 +193,6 @@ body.collapsed .grip { width: 4px; }
   white-space: nowrap;
 }
 
-/* ---------- "move to workspace" select ---------- */
-.assign {
-  background: var(--bg-3);
-  border: 1px solid var(--line);
-  color: var(--fg-dim);
-  border-radius: 7px;
-  padding: 3px 5px;
-  font: inherit;
-  font-size: 11px;
-  max-width: 110px;
-  cursor: pointer;
-}
-.assign:hover { border-color: var(--accent); color: var(--fg); }
-
 /* ---------- modal ---------- */
 .modal-backdrop {
   position: fixed;
@@ -380,9 +366,37 @@ body.collapsed .grip { width: 4px; }
   align-items: center;
   justify-content: center;
 }
-/* The Move-to select shows only its folder icon when collapsed — the
-   workspace names still appear in the dropdown itself. */
-.item-actions .assign { flex: 0 0 auto; width: 44px; padding: 3px 2px; max-width: none; }
+.item-actions .icon-btn svg { width: 15px; height: 15px; }
+
+/* "Move to" popup menu — anchored under the move button. */
+.move-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 160px;
+  max-width: 220px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+}
+.move-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.move-menu button:hover { background: var(--bg-2); }
 
 .empty {
   color: var(--fg-dim);

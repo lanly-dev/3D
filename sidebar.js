@@ -15,6 +15,32 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+// Stroke icons for the per-asset action buttons (24x24, Lucide-style,
+// drawn in the button's own color). SVG beats emoji here: consistent
+// weight and size at 15px, no platform emoji style surprises.
+function icon(paths) {
+  return (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    paths +
+    '</svg>'
+  );
+}
+const ICONS = {
+  reveal:
+    '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9l-.81-1.2A2 2 0 0 0 8.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' +
+    '<path d="M2 10h20"/>',
+  open:
+    '<path d="M15 3h6v6"/><path d="M10 14 21 3"/>' +
+    '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  move:
+    '<path d="M5 9l-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="M15 19l-3 3-3-3"/>' +
+    '<path d="M19 9l3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>',
+  code:
+    '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  remove: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+};
+
 function formatSize(bytes) {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -179,43 +205,20 @@ function renderList() {
     const actions = document.createElement('div');
     actions.className = 'item-actions';
 
-    // Move this asset to another workspace.
-    const assign = document.createElement('select');
-    assign.className = 'assign';
-    assign.title = 'Move this file into another workspace folder (Unassigned = Documents\\Hunyuan3D\\Unassigned)';
-    const blank = document.createElement('option');
-    blank.value = '';
-    blank.textContent = '📁';
-    blank.selected = true;
-    assign.appendChild(blank);
-    for (const w of state.workspaces) {
-      const opt = document.createElement('option');
-      opt.value = w.id;
-      opt.textContent = w.name;
-      assign.appendChild(opt);
-    }
-    const noneOpt = document.createElement('option');
-    noneOpt.value = '__none__';
-    noneOpt.textContent = 'Unassigned';
-    assign.appendChild(noneOpt);
-    assign.addEventListener('change', (e) => {
+    // Move this asset to another workspace — an icon button that opens a
+    // small menu (a <select> can't show an SVG as its collapsed label).
+    const move = document.createElement('button');
+    move.className = 'btn icon-btn move-btn';
+    move.innerHTML = icon(ICONS.move);
+    move.title = 'Move this file into another workspace folder (Unassigned = Documents\\Hunyuan3D\\Unassigned)';
+    move.addEventListener('click', (e) => {
       e.stopPropagation();
-      const v = e.target.value;
-      if (!v) return;
-      const target = v === '__none__' ? null : v;
-      bridge.assign(a.id, target).then((res) => {
-        if (res && res.ok === false) {
-          setStatus(res.message || 'Move failed');
-        } else {
-          setStatus(`File moved to ${target ? workspaceName(target) : 'Unassigned'}`);
-        }
-        refresh();
-      });
+      openMoveMenu(move, a);
     });
 
     const reveal = document.createElement('button');
     reveal.className = 'btn icon-btn';
-    reveal.textContent = '📂';
+    reveal.innerHTML = icon(ICONS.reveal);
     reveal.title = 'Show this file in Explorer';
     reveal.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -223,18 +226,18 @@ function renderList() {
     });
     const open = document.createElement('button');
     open.className = 'btn icon-btn';
-    open.textContent = '↗';
+    open.innerHTML = icon(ICONS.open);
     open.title = 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
       bridge.open(a.filePath).then((ok) => setStatus(ok ? 'Opened' : 'Cannot open this file'));
     });
-    actions.append(reveal, open, assign);
+    actions.append(reveal, open, move);
 
     if (a.kind === 'model') {
       const conv = document.createElement('button');
       conv.className = 'btn icon-btn';
-      conv.textContent = '🐍';
+      conv.innerHTML = icon(ICONS.code);
       conv.title = 'Convert this model into editable Blender Python code with MeshCoder';
       conv.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -245,7 +248,7 @@ function renderList() {
 
     const del = document.createElement('button');
     del.className = 'btn icon-btn';
-    del.textContent = '✕';
+    del.innerHTML = icon(ICONS.remove);
     del.title = 'Stop tracking this asset — the file itself is NOT deleted';
     del.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -258,7 +261,61 @@ function renderList() {
   }
 }
 
+// ---- "Move to" popup menu (one open at a time) ----
+let moveMenuEl = null;
+
+function closeMoveMenu() {
+  if (moveMenuEl) {
+    moveMenuEl.remove();
+    moveMenuEl = null;
+  }
+}
+
+function openMoveMenu(anchor, asset) {
+  closeMoveMenu();
+  const menu = document.createElement('div');
+  menu.className = 'move-menu';
+  const add = (label, target) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      closeMoveMenu();
+      bridge.assign(asset.id, target).then((res) => {
+        if (res && res.ok === false) {
+          setStatus(res.message || 'Move failed');
+        } else {
+          setStatus(`File moved to ${target ? workspaceName(target) : 'Unassigned'}`);
+        }
+        refresh();
+      });
+    });
+    menu.appendChild(b);
+  };
+  for (const w of state.workspaces) {
+    add((w.id === asset.workspaceId ? '✓ ' : '') + w.name, w.id);
+  }
+  add(asset.workspaceId ? 'Unassigned' : '✓ Unassigned', null);
+  document.body.appendChild(menu);
+  // Sit under the button; flip above it if the viewport runs out.
+  const r = anchor.getBoundingClientRect();
+  let top = r.bottom + 4;
+  if (top + menu.offsetHeight > window.innerHeight) {
+    top = Math.max(4, r.top - menu.offsetHeight - 4);
+  }
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.left)) + 'px';
+  menu.style.top = top + 'px';
+  moveMenuEl = menu;
+}
+
+// Clicking anywhere outside the menu (or its button) dismisses it.
+document.addEventListener('click', (e) => {
+  if (moveMenuEl && !moveMenuEl.contains(e.target) && !e.target.closest('.move-btn')) {
+    closeMoveMenu();
+  }
+});
+
 async function refresh() {
+  closeMoveMenu();
   const [wsData, assets] = await Promise.all([bridge.workspaces(), bridge.list()]);
   state.workspaces = wsData.workspaces || [];
   state.activeId = wsData.activeId || null;
