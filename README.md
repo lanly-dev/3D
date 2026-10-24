@@ -12,7 +12,8 @@ A small desktop wrapper around the Hunyuan3D web app
 - **Translate site to English** (Hunyuan3D menu) — the site ships
   Chinese-first, so this restarts the app asking for English (en-US locale
   + `Accept-Language`) and machine-translates whatever still renders in
-  Chinese, in place, via Google Translate's widget.
+  Chinese with a small built-in translator that calls Google Translate's
+  free endpoint directly — no Google widget, no banner or floating button.
 - **Workspaces** — named folders that own a project and its assets.
 - **Asset sidebar** — an index of tracked models and generated scripts, with
   filters, per-asset actions, and a workspace scope.

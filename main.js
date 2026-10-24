@@ -15,7 +15,9 @@
  *    MeshCoder install on your GPU. See meshcoder.js + the README.
  *  - Menu option "Translate site to English": restarts the app with an
  *    en-US locale + Accept-Language, and machine-translates the site text
- *    in place via Google Translate's widget (the site ships Chinese-first).
+ *    in place with a small injected translator of our own (the site ships
+ *    Chinese-first). No Google widget — it left a banner and a floating
+ *    button on the page no matter how hard we hid them.
  *
  * What it does NOT do:
  *  - No automation of the web app, no page scripting, no generation-driving.
@@ -97,80 +99,319 @@ function toggleTranslate() {
   app.exit(0);
 }
 
-// Page snippet injected when translation is on: sets Google Translate's
-// zh-CN -> en cookie and loads its (free) widget, which then translates the
-// page text in place and keeps translating new UI as the SPA renders.
-// All of the widget's own chrome (top banner, floating button, gadget)
-// is hidden — translation just happens.
-const TRANSLATE_SNIPPET = `
-(function () {
-  if (document.getElementById('hy3d-gt-script')) return;
-  try { document.cookie = 'googtrans=/zh-CN/en; path=/'; } catch (e) {}
-  window.__hy3dTranslateInit = function () {
-    new google.translate.TranslateElement(
-      { pageLanguage: 'zh-CN', includedLanguages: 'en', autoDisplay: false },
-      'hy3d-gt-el'
-    );
-  };
-  var holder = document.createElement('div');
-  holder.id = 'hy3d-gt-el';
-  holder.style.display = 'none';
-  document.documentElement.appendChild(holder);
-  var style = document.createElement('style');
-  style.textContent =
-    '.goog-te-banner-frame,.goog-te-balloon-frame,#goog-gt-tt,' +
-    'iframe.skiptranslate,[class*="VIpgJd-ZVi9od-ORHb"],' +
-    '[class*="VIpgJd-ZVi9od-aZ2wEe"]' +
-    '{display:none!important;visibility:hidden!important;height:0!important}' +
-    'body{top:0!important}';
-  document.documentElement.appendChild(style);
-  // The widget keeps re-inserting its chrome under changing class names
-  // and with inline styles that beat a plain stylesheet — so sweep for
-  // every known variant (top banner, balloon, and the floating round
-  // button) and stamp inline !important hiding on sight, and keep the
-  // page from being pushed down. The sweeper runs on DOM mutations AND
-  // on a timer, because chrome can also appear long after load (first
-  // translation, panel switches).
-  function hideTranslateChrome() {
-    document
-      .querySelectorAll(
-        '.goog-te-banner-frame,.goog-te-balloon-frame,iframe.skiptranslate,' +
-          '[class*="VIpgJd-ZVi9od-ORHb"],[class*="VIpgJd-ZVi9od-aZ2wEe"]'
-      )
-      .forEach(function (el) {
-        el.style.setProperty('display', 'none', 'important');
-        el.style.setProperty('visibility', 'hidden', 'important');
-        el.style.setProperty('height', '0', 'important');
+// In-page translator, injected when translation is on. Self-contained on
+// purpose: it is stringified with Function#toString and run inside the
+// site's page, so it cannot reference anything from this module's scope.
+// It walks the page's text (and placeholders/tooltips), sends Chinese
+// strings to Google Translate's free endpoint in small batches, and swaps
+// the English in place. If Google refuses (rate limit / block), it falls
+// back to the MyMemory API; if that fails too, the Chinese is left as-is.
+// Translations are cached in the page's localStorage, so repeat strings
+// cost nothing. No Google widget is loaded — there is no banner, button
+// or other foreign UI to hide.
+function pageTranslator() {
+  if (window.__hy3dTranslator) return;
+  window.__hy3dTranslator = true;
+  // A leftover cookie from the old widget days; harmless, but tidy it up.
+  try {
+    document.cookie = 'googtrans=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+  } catch (e) {}
+
+  var ZH = /[\u3400-\u9FFF\uF900-\uFAFF]/;
+  var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1, CODE: 1, PRE: 1 };
+  var ATTRS = ['placeholder', 'title', 'alt', 'aria-label'];
+  var CACHE_KEY = 'hy3dTrCacheV1';
+
+  var cache = {};
+  try {
+    cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {};
+  } catch (e) {
+    cache = {};
+  }
+  var saveTimer = null;
+  function saveCache() {
+    if (saveTimer) return;
+    saveTimer = setTimeout(function () {
+      saveTimer = null;
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      } catch (e) {}
+    }, 400);
+  }
+
+  var waiters = {}; // src -> [job]; job: {kind:'text',node} | {kind:'attr',el,attr} | {kind:'title'}
+  var queued = {}; // src -> true while it sits in the request queue
+  var queue = []; // srcs waiting to be requested
+  var singles = {}; // srcs that must be requested one at a time (batch alignment failed)
+  var inFlight = 0;
+  var flushTimer = null;
+  var googleFails = 0;
+  var applied = new WeakMap(); // node/element -> what we last set (mutation-loop guard)
+
+  function resolve(src, dst) {
+    delete queued[src];
+    var jobs = waiters[src] || [];
+    delete waiters[src];
+    if (dst) {
+      cache[src] = dst;
+      saveCache();
+    }
+    jobs.forEach(function (job) {
+      if (!dst) return; // translation failed — leave the Chinese untouched
+      if (job.kind === 'text') applyText(job.node, src, dst);
+      else if (job.kind === 'attr') applyAttr(job.el, job.attr, src, dst);
+      else if (job.kind === 'title' && document.title === src) document.title = dst;
+    });
+  }
+
+  function applyText(node, src, dst) {
+    var cur = node.nodeValue || '';
+    if (cur.trim() !== src) {
+      scanTextNode(node); // the text changed while we were translating
+      return;
+    }
+    var next = cur.match(/^\s*/)[0] + dst + cur.match(/\s*$/)[0];
+    applied.set(node, next);
+    node.nodeValue = next;
+  }
+
+  function applyAttr(el, attr, src, dst) {
+    if (el.getAttribute(attr) !== src) {
+      scanAttrs(el);
+      return;
+    }
+    var m = applied.get(el) || {};
+    m[attr] = dst;
+    applied.set(el, m);
+    el.setAttribute(attr, dst);
+  }
+
+  function applyJob(job, src, dst) {
+    if (job.kind === 'text') applyText(job.node, src, dst);
+    else if (job.kind === 'attr') applyAttr(job.el, job.attr, src, dst);
+    else if (job.kind === 'title' && document.title === src) document.title = dst;
+  }
+
+  function addWaiter(src, job) {
+    if (Object.prototype.hasOwnProperty.call(cache, src)) {
+      applyJob(job, src, cache[src]);
+      return;
+    }
+    (waiters[src] = waiters[src] || []).push(job);
+    if (!queued[src]) {
+      queued[src] = true;
+      queue.push(src);
+    }
+    scheduleFlush();
+  }
+
+  function fetchGoogle(text) {
+    var url =
+      'https://translate.googleapis.com/translate_a/single?client=gtx&sl=zh-CN&tl=en&dt=t&q=' +
+      encodeURIComponent(text);
+    return fetch(url, { credentials: 'omit' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('http ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data[0]) throw new Error('unexpected response');
+        var out = '';
+        data[0].forEach(function (seg) {
+          if (seg && seg[0]) out += seg[0];
+        });
+        return out;
+      })
+      .catch(function () {
+        return null;
       });
-    if (document.body && document.body.style.top && document.body.style.top !== '0px') {
-      document.body.style.setProperty('top', '0px', 'important');
+  }
+
+  function fetchMyMemory(text) {
+    var url =
+      'https://api.mymemory.translated.net/get?langpair=zh-CN|en&q=' +
+      encodeURIComponent(text);
+    return fetch(url, { credentials: 'omit' })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (d) {
+        var t = d && d.responseData && d.responseData.translatedText;
+        if (!t || t === text || /MYMEMORY|INVALID|QUOTA/i.test(t)) return null;
+        return t;
+      })
+      .catch(function () {
+        return null;
+      });
+  }
+
+  function translateSingle(src) {
+    inFlight++;
+    var finish = function (dst) {
+      inFlight--;
+      resolve(src, dst ? dst.trim() : null);
+      flush();
+    };
+    if (googleFails < 3) {
+      fetchGoogle(src).then(function (g) {
+        if (g !== null) {
+          googleFails = 0;
+          finish(g);
+        } else {
+          googleFails++;
+          fetchMyMemory(src).then(finish);
+        }
+      });
+    } else {
+      fetchMyMemory(src).then(finish);
     }
   }
-  new MutationObserver(hideTranslateChrome).observe(document.documentElement, {
+
+  function sendBatch(batch) {
+    inFlight++;
+    fetchGoogle(batch.join('\n')).then(function (full) {
+      inFlight--;
+      var lines = full !== null ? full.split('\n') : null;
+      if (lines && lines.length === batch.length) {
+        googleFails = 0;
+        batch.forEach(function (src, i) {
+          resolve(src, lines[i].trim() || null);
+        });
+      } else {
+        // The lines did not line up (or Google refused): redo one by one.
+        // (queued[src] is still set from the original queueing — the
+        // strings just need to go back into the queue as singles.)
+        if (full === null) googleFails++;
+        batch.forEach(function (src) {
+          singles[src] = true;
+          queue.unshift(src);
+        });
+      }
+      flush();
+    });
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(flush, 150);
+  }
+
+  function flush() {
+    flushTimer = null;
+    while (inFlight < 3 && queue.length) {
+      if (singles[queue[0]]) {
+        delete singles[queue[0]];
+        translateSingle(queue.shift());
+        continue;
+      }
+      var batch = [];
+      var chars = 0;
+      while (queue.length && batch.length < 40 && !singles[queue[0]]) {
+        var s = queue[0];
+        if (batch.length && chars + s.length > 900) break;
+        batch.push(queue.shift());
+        chars += s.length + 1;
+      }
+      if (batch.length === 1) translateSingle(batch[0]);
+      else if (batch.length > 1) sendBatch(batch);
+    }
+  }
+
+  function skippable(el) {
+    var n = el;
+    while (n && n !== document.body) {
+      if (SKIP_TAGS[n.tagName]) return true;
+      if (n.isContentEditable) return true;
+      if (n.getAttribute && n.getAttribute('translate') === 'no') return true;
+      if (typeof n.className === 'string' && n.className.indexOf('notranslate') >= 0) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
+
+  function scanTextNode(node) {
+    var v = node.nodeValue || '';
+    if (applied.get(node) === v) return;
+    var src = v.trim();
+    if (!src || !ZH.test(src)) return;
+    var parent = node.parentElement;
+    if (!parent || skippable(parent)) return;
+    addWaiter(src, { kind: 'text', node: node });
+  }
+
+  function scanAttrs(el) {
+    if (!el.getAttribute || skippable(el)) return;
+    var attrs = ATTRS;
+    if (el.tagName === 'INPUT') {
+      var t = (el.getAttribute('type') || '').toLowerCase();
+      if (t === 'button' || t === 'submit' || t === 'reset') attrs = ATTRS.concat(['value']);
+    }
+    var m = applied.get(el) || {};
+    attrs.forEach(function (attr) {
+      var v = el.getAttribute(attr);
+      if (!v || m[attr] === v) return;
+      var src = v.trim();
+      if (src && ZH.test(src)) addWaiter(src, { kind: 'attr', el: el, attr: attr });
+    });
+  }
+
+  function scanRoot(root) {
+    if (!root) return;
+    if (root.nodeType === 3) {
+      scanTextNode(root);
+      return;
+    }
+    if (root.nodeType !== 1) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var n;
+    while ((n = walker.nextNode())) scanTextNode(n);
+    scanAttrs(root);
+    var els = root.querySelectorAll(
+      '[placeholder],[title],[alt],[aria-label],input[type=button],input[type=submit],input[type=reset]'
+    );
+    for (var i = 0; i < els.length; i++) scanAttrs(els[i]);
+  }
+
+  function scanTitle() {
+    var t = document.title;
+    if (t && ZH.test(t)) addWaiter(t, { kind: 'title' });
+  }
+
+  var pendingRoots = [];
+  var scanTimer = null;
+  function queueScan(root) {
+    pendingRoots.push(root);
+    if (scanTimer) return;
+    scanTimer = setTimeout(function () {
+      scanTimer = null;
+      var roots = pendingRoots;
+      pendingRoots = [];
+      roots.forEach(scanRoot);
+      scanTitle();
+    }, 120);
+  }
+
+  new MutationObserver(function (muts) {
+    muts.forEach(function (m) {
+      if (m.type === 'characterData') queueScan(m.target);
+      else if (m.type === 'attributes') queueScan(m.target);
+      else if (m.addedNodes) {
+        for (var i = 0; i < m.addedNodes.length; i++) queueScan(m.addedNodes[i]);
+      }
+    });
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['placeholder', 'title', 'alt', 'aria-label', 'value'],
   });
-  setInterval(hideTranslateChrome, 1000);
-  var s = document.createElement('script');
-  s.id = 'hy3d-gt-script';
-  s.src = 'https://translate.google.com/translate_a/element.js?cb=__hy3dTranslateInit';
-  document.documentElement.appendChild(s);
-  // Belt and suspenders: if the cookie alone doesn't start translation,
-  // pick English in the widget's own language combo once it appears.
-  var tries = 0;
-  var iv = setInterval(function () {
-    var combo = document.querySelector('.goog-te-combo');
-    if (combo) {
-      if (combo.value !== 'en') {
-        combo.value = 'en';
-        combo.dispatchEvent(new Event('change'));
-      }
-      clearInterval(iv);
-    }
-    if (++tries > 20) clearInterval(iv);
-  }, 500);
-})();
-`;
+
+  scanRoot(document.body || document.documentElement);
+  scanTitle();
+}
+
+const TRANSLATE_SNIPPET = '(' + pageTranslator.toString() + ')();';
 
 function injectTranslator(contents) {
   contents.executeJavaScript(TRANSLATE_SNIPPET).catch(() => {});
