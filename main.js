@@ -100,7 +100,8 @@ function toggleTranslate() {
 // Page snippet injected when translation is on: sets Google Translate's
 // zh-CN -> en cookie and loads its (free) widget, which then translates the
 // page text in place and keeps translating new UI as the SPA renders.
-// The widget's own banner/gadget are hidden — translation just happens.
+// All of the widget's own chrome (top banner, floating button, gadget)
+// is hidden — translation just happens.
 const TRANSLATE_SNIPPET = `
 (function () {
   if (document.getElementById('hy3d-gt-script')) return;
@@ -118,21 +119,23 @@ const TRANSLATE_SNIPPET = `
   var style = document.createElement('style');
   style.textContent =
     '.goog-te-banner-frame,.goog-te-balloon-frame,#goog-gt-tt,' +
-    'iframe.skiptranslate,[class*="VIpgJd-ZVi9od-ORHb"]' +
+    'iframe.skiptranslate,[class*="VIpgJd-ZVi9od-ORHb"],' +
+    '[class*="VIpgJd-ZVi9od-aZ2wEe"]' +
     '{display:none!important;visibility:hidden!important;height:0!important}' +
     'body{top:0!important}';
   document.documentElement.appendChild(style);
-  // The widget keeps re-inserting its banner under changing class names
+  // The widget keeps re-inserting its chrome under changing class names
   // and with inline styles that beat a plain stylesheet — so sweep for
-  // every known banner variant and stamp inline !important hiding on
-  // sight, and keep the page from being pushed down. The sweeper runs on
-  // DOM mutations AND on a timer, because the banner can also appear
-  // long after load (first translation, panel switches).
+  // every known variant (top banner, balloon, and the floating round
+  // button) and stamp inline !important hiding on sight, and keep the
+  // page from being pushed down. The sweeper runs on DOM mutations AND
+  // on a timer, because chrome can also appear long after load (first
+  // translation, panel switches).
   function hideTranslateChrome() {
     document
       .querySelectorAll(
         '.goog-te-banner-frame,.goog-te-balloon-frame,iframe.skiptranslate,' +
-          '[class*="VIpgJd-ZVi9od-ORHb"]'
+          '[class*="VIpgJd-ZVi9od-ORHb"],[class*="VIpgJd-ZVi9od-aZ2wEe"]'
       )
       .forEach(function (el) {
         el.style.setProperty('display', 'none', 'important');
