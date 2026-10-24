@@ -88,9 +88,13 @@ clones the code into `Documents/Hunyuan3D/MeshCoder` if needed, creates a
 Python 3.10 venv in `Documents/Hunyuan3D/MeshCoderEnv` (installing Python
 3.10 itself if none is found), pip-installs the packages, downloads the
 checkpoints from Hugging Face, and verifies by importing the inference
-module. Two entries of MeshCoder's conda recipe are skipped on purpose:
-`pytorch3d` (no Windows builds exist, and the inference path never imports
-it) and `bpy` (the inference path saves meshes via trimesh). The checkpoints
+module. Two gaps in MeshCoder's recipe are bridged with stand-ins in
+`meshcoder-shim/`: `pytorch3d` (no Windows builds; the setup installs a
+functional pure-PyTorch implementation of the three pieces the import
+chain touches) and `bpy` (4.0.0 was never published to PyPI; an
+import-only stub covers the training-evaluation module that imports it).
+`accelerate` is pinned to 1.11.0, the last line whose `accelerate.utils`
+still exports a name MeshCoder imports. The checkpoints
 are gated: submit the one-time access form on the
 [Hugging Face model page](https://huggingface.co/InternRobotics/MeshCoder)
 first, then paste a token into the setup window — it is used once and never

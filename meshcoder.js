@@ -402,10 +402,22 @@ async function convertToCode(meshPath, outDir) {
 /* A venv in Documents/Hunyuan3D/MeshCoderEnv, built from a Python    */
 /* 3.10 (the user's own, or the official installer), the pip-         */
 /* installable subset of MeshCoder's recipe, and the checkpoints      */
-/* from Hugging Face. Two recipe entries are deliberately skipped:    */
-/* pytorch3d (no Windows builds exist; inference never imports it —   */
-/* its one import in the entry script is commented out) and bpy       */
-/* (Blender's module; the inference path saves meshes via trimesh).   */
+/* from Hugging Face. Where the recipe cannot run on Windows, the     */
+/* setup bridges the gap (all verified by an import smoke test of     */
+/* the real inference module):                                        */
+/*   - pytorch3d has no Windows builds, and bpy==4.0.0 was never      */
+/*     published to PyPI at all. Both are imported at module level    */
+/*     by a training-time evaluation module in the inference chain,   */
+/*     so the setup installs small stand-ins (meshcoder-shim/): a     */
+/*     functional pure-PyTorch pytorch3d (chamfer_distance,           */
+/*     sample_points_from_meshes, Meshes) and an import-only bpy      */
+/*     stub — the code paths that would call bpy belong to            */
+/*     training evaluation and cannot run on Windows anyway           */
+/*     (signal.SIGALRM).                                              */
+/*   - accelerate is pinned to 1.11.0: newer releases renamed         */
+/*     is_ccl_available, which MeshCoder's code imports.              */
+/*   - fvcore/iopath are only pytorch3d dependencies; the inference   */
+/*     chain never imports them, so they are not installed.           */
 /* ------------------------------------------------------------------ */
 
 const HF_REPO = 'InternRobotics/MeshCoder';
@@ -647,10 +659,9 @@ async function createEnv(basePython, { onLog = () => {}, registerChild } = {}) {
 
 /**
  * The pip install sequence, as data so the caller can run and label the
- * steps. Mirrors MeshCoder's README recipe with these native-Windows
- * adjustments: fvcore/iopath via pip (pure Python), xformers optional
- * (only used by the fast-kernels path, which conversion does not enable),
- * pytorch3d and bpy skipped (see the section note above).
+ * steps. Mirrors MeshCoder's README recipe with the native-Windows
+ * adjustments described in the section note above (shims and the
+ * accelerate pin are handled separately / last).
  */
 function installSteps(home) {
   const py = envPython();
@@ -664,10 +675,55 @@ function installSteps(home) {
     step('Upgrade pip', ['--upgrade', 'pip']),
     step('PyTorch 2.4.1 + CUDA 11.8', ['torch==2.4.1', 'torchvision==0.19.1', 'torchaudio==2.4.1', '--index-url', 'https://download.pytorch.org/whl/cu118']),
     step('torch-scatter', ['torch-scatter', '-f', 'https://data.pyg.org/whl/torch-2.4.1+cu118.html']),
-    step('Remaining packages', ['opencv-python', 'trimesh', 'jaxtyping', 'einops', 'omegaconf', 'scikit-image', 'wandb', 'mathutils', 'boto3', 'typeguard', 'fvcore', 'iopath', 'fire', 'gradio']),
+    step('Remaining packages', ['opencv-python', 'trimesh', 'jaxtyping', 'einops', 'omegaconf', 'scikit-image', 'wandb', 'boto3', 'typeguard', 'fire', 'gradio']),
     step('xformers (optional)', ['-U', 'xformers==0.0.28', '--index-url', 'https://download.pytorch.org/whl/cu118', '--no-deps'], { optional: true }),
     step('MeshCoder package', ['-e', home]),
+    step('Compatibility pins', ['accelerate==1.11.0']),
   ];
+}
+
+/** The env's site-packages folder (where pip put everything). */
+function sitePackagesDir() {
+  if (process.platform === 'win32') return path.join(envDir(), 'Lib', 'site-packages');
+  try {
+    const lib = path.join(envDir(), 'lib');
+    const pyDir = fs.readdirSync(lib).find((d) => d.startsWith('python'));
+    if (pyDir) return path.join(lib, pyDir, 'site-packages');
+  } catch {
+    /* env not created yet */
+  }
+  return path.join(envDir(), 'lib', 'python3.10', 'site-packages');
+}
+
+/**
+ * Copy the pytorch3d / bpy stand-ins (meshcoder-shim/, next to this file)
+ * into the env. A real pytorch3d or bpy already in the env is left
+ * untouched — the stand-ins only fill gaps.
+ */
+function installShims(onLog = () => {}) {
+  const dest = sitePackagesDir();
+  fs.mkdirSync(dest, { recursive: true });
+  const srcRoot = path.join(__dirname, 'meshcoder-shim');
+  const p3dDest = path.join(dest, 'pytorch3d');
+  const p3dInit = path.join(p3dDest, '__init__.py');
+  const realP3d = fs.existsSync(p3dInit) && !fs.readFileSync(p3dInit, 'utf8').includes('Hunyuan3D');
+  if (realP3d) {
+    onLog('A real pytorch3d is installed — leaving it in place.');
+  } else {
+    fs.cpSync(path.join(srcRoot, 'pytorch3d'), p3dDest, { recursive: true, force: true });
+    onLog('Installed the pure-PyTorch pytorch3d stand-in.');
+  }
+  const bpyDest = path.join(dest, 'bpy.py');
+  if (fs.existsSync(bpyDest) && !fs.readFileSync(bpyDest, 'utf8').includes('Hunyuan3D')) {
+    onLog('A real bpy module is installed — leaving it in place.');
+  } else if (!fs.existsSync(path.join(dest, 'bpy')) && !fs.existsSync(bpyDest)) {
+    fs.copyFileSync(path.join(srcRoot, 'bpy.py'), bpyDest);
+    onLog('Installed the import-only bpy stub.');
+  } else if (fs.existsSync(bpyDest)) {
+    fs.copyFileSync(path.join(srcRoot, 'bpy.py'), bpyDest);
+    onLog('Refreshed the import-only bpy stub.');
+  }
+  return dest;
 }
 
 /**
@@ -692,4 +748,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, HF_REPO };

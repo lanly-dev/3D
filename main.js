@@ -1304,6 +1304,11 @@ async function runSetup(token) {
       }
     }
     checkCancel();
+    // 3b. Windows stand-ins for pytorch3d / bpy (see meshcoder.js).
+    setupState({ phase: 'running', label: 'Installing compatibility stand-ins…', pct: -1 });
+    log('\n=== Compatibility stand-ins (pytorch3d / bpy) ===');
+    meshcoder.installShims(log);
+    checkCancel();
     // 4. Checkpoints from Hugging Face.
     if (!meshcoder.checkpointsPresent(home)) {
       setupState({ phase: 'running', label: 'Downloading checkpoints…', pct: 0 });
