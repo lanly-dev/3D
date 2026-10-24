@@ -1,0 +1,12 @@
+/* Thumbnail renderer page — a bare canvas, no toolbar. */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: #1b1e25;
+  overflow: hidden;
+}
+
+canvas { display: block; }

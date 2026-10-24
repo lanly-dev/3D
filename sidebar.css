@@ -317,6 +317,9 @@ body.collapsed .grip { width: 4px; }
 }
 
 .item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -326,6 +329,27 @@ body.collapsed .grip { width: 4px; }
 }
 .item:hover { border-color: var(--accent); }
 .item.missing { opacity: .55; }
+
+.item-body { flex: 1 1 auto; min-width: 0; }
+
+.thumb {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  object-fit: cover;
+}
+.thumb.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
 
 .item-top { display: flex; align-items: center; gap: 7px; }
 .badge {

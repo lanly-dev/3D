@@ -323,7 +323,27 @@ function renderList() {
     });
     actions.append(del);
 
-    el.append(top, meta, actions);
+    const body = document.createElement('div');
+    body.className = 'item-body';
+    body.append(top, meta, actions);
+    if (a.kind === 'model') {
+      // Rendered preview when cached, else a small placeholder tile with
+      // the extension while the background worker renders it.
+      let thumb;
+      if (a.thumb) {
+        thumb = document.createElement('img');
+        thumb.className = 'thumb';
+        thumb.src = a.thumb;
+        thumb.alt = '';
+      } else {
+        thumb = document.createElement('div');
+        thumb.className = 'thumb placeholder';
+        thumb.textContent = (a.ext || 'file').replace('.', '');
+      }
+      el.append(thumb, body);
+    } else {
+      el.append(body);
+    }
     list.appendChild(el);
   }
 }

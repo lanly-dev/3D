@@ -38,8 +38,10 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const url = require('url');
 const meshcoder = require('./meshcoder');
 const assets = require('./assets');
+const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
 const compounding = require('./compounding');
 
@@ -537,6 +539,82 @@ function saveLayout() {
     );
   } catch {
     /* non-fatal */
+  }
+}
+
+/**
+ * Thumbnail worker: renders one model in a hidden window and caches the
+ * capture under <userData>/thumbs/<asset-id>.png. Jobs run one at a time
+ * so a big library does not spawn a storm of windows; each completion
+ * notifies the sidebar, so thumbnails appear progressively. A failed
+ * render is recorded against the file's mtime and retried only when the
+ * file changes.
+ */
+const thumbQueue = new Set();
+let thumbWorking = false;
+let thumbCurrent = null;
+
+function queueThumb(asset) {
+  if (!asset || asset.id === thumbCurrent) return;
+  thumbQueue.add(asset.id);
+  pumpThumbQueue();
+}
+
+async function pumpThumbQueue() {
+  if (thumbWorking) return;
+  thumbWorking = true;
+  try {
+    while (thumbQueue.size) {
+      const id = thumbQueue.values().next().value;
+      thumbQueue.delete(id);
+      thumbCurrent = id;
+      try {
+        await renderThumb(id);
+      } catch { /* a failed render is recorded inside renderThumb */ }
+      thumbCurrent = null;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  } finally {
+    thumbWorking = false;
+    thumbCurrent = null;
+  }
+}
+
+async function renderThumb(id) {
+  const asset = assets.find(id);
+  if (!asset || !fs.existsSync(asset.filePath)) return;
+  const win = new BrowserWindow({
+    width: 144,
+    height: 144,
+    show: false,
+    frame: false, // no title bar, so the capture is a true square
+    webPreferences: {
+      preload: path.join(__dirname, 'viewer-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  try {
+    await win.loadFile(path.join(__dirname, 'thumb.html'), { query: { file: asset.filePath } });
+    const deadline = Date.now() + 30000;
+    let status = null;
+    while (Date.now() < deadline) {
+      if (win.isDestroyed()) break;
+      status = await win.webContents.executeJavaScript('window.__thumbStatus || null').catch(() => null);
+      if (status) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    if (status === 'ok') {
+      const img = await win.webContents.capturePage();
+      fs.mkdirSync(thumbs.dir(), { recursive: true });
+      fs.writeFileSync(thumbs.thumbPath(id), img.toPNG());
+      thumbs.set(id, fs.statSync(asset.filePath).mtimeMs);
+      notifySidebar();
+    } else if (fs.existsSync(asset.filePath)) {
+      thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
+    }
+  } finally {
+    if (!win.isDestroyed()) win.close();
   }
 }
 
@@ -1138,7 +1216,23 @@ function registerIpc() {
   ipcMain.on('nav:zoomOut', () => stepZoom(-1));
   ipcMain.on('nav:zoomReset', () => applyZoom(1));
 
-  ipcMain.handle('assets:list', (_e, workspaceId) => assets.list(workspaceId || null));
+  ipcMain.handle('assets:list', (_e, workspaceId) => {
+    const list = assets.list(workspaceId || null);
+    for (const a of list) {
+      if (a.kind !== 'model' || !a.exists) continue;
+      const meta = thumbs.get(a.id);
+      const pngExists = fs.existsSync(thumbs.thumbPath(a.id));
+      const fresh = meta && !meta.failed && meta.mtimeMs === a.updatedAt && pngExists;
+      if (fresh) {
+        a.thumb = url.pathToFileURL(thumbs.thumbPath(a.id)).href;
+      } else if (!meta || !meta.failed || meta.mtimeMs !== a.updatedAt) {
+        // Missing, stale, or deleted PNG — but a render that failed for
+        // this exact file version is not retried until the file changes.
+        queueThumb(a);
+      }
+    }
+    return list;
+  });
   ipcMain.handle('assets:stats', (_e, workspaceId) => assets.stats(workspaceId || null));
   ipcMain.handle('assets:track', (_e, filePath, workspaceId) => {
     const record = assets.track(String(filePath || ''), null, workspaceId || null);
@@ -1163,6 +1257,7 @@ function registerIpc() {
   });
   ipcMain.handle('assets:remove', (_e, id) => {
     assets.remove(String(id || ''));
+    thumbs.remove(String(id || ''));
     notifySidebar();
     return true;
   });
