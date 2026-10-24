@@ -57,6 +57,9 @@ const SIDEBAR_DEFAULT_WIDTH = 288;
 
 // Top navigation bar (back / forward / reload), under the app menu.
 const NAV_BAR_HEIGHT = 34;
+
+// Site view zoom steps (browser-style), for the nav bar's scaling buttons.
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 const SIDEBAR_COLLAPSED_WIDTH = 36;
 
 let lastDownloadPath = null;
@@ -584,7 +587,19 @@ function createMainWindow() {
   // Keep the nav bar's back/forward arrows in sync with the site history.
   siteView.webContents.on('did-navigate', pushNavState);
   siteView.webContents.on('did-navigate-in-page', pushNavState);
-  siteView.webContents.on('did-finish-load', pushNavState);
+  siteView.webContents.on('did-finish-load', () => {
+    // Re-apply the saved zoom (Chromium forgets it across restarts),
+    // then refresh the nav bar state.
+    if (settings.zoomFactor && settings.zoomFactor !== 1) {
+      try {
+        siteView.webContents.setZoomFactor(settings.zoomFactor);
+      } catch {
+        /* view going away — ignore */
+      }
+    }
+    pushNavState();
+  });
+  siteView.webContents.on('zoom-changed', pushNavState);
   if (settings.translateToEnglish) {
     const siteContents = siteView.webContents;
     siteContents.on('dom-ready', () => injectTranslator(siteContents));
@@ -648,13 +663,59 @@ function navGo(wc, dir) {
   }
 }
 
-/** Enable/disable the nav bar arrows to match the site view's history. */
+/** Enable/disable the nav bar arrows and set its zoom readout. */
 function pushNavState() {
   if (!navView || navView.webContents.isDestroyed() || !siteView) return;
+  const zoom = currentZoom();
   navView.webContents.send('nav:state', {
     canGoBack: navCan(siteView.webContents, 'back'),
     canGoForward: navCan(siteView.webContents, 'forward'),
+    zoomPct: Math.round(zoom * 100),
+    canZoomIn: zoom < ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001,
+    canZoomOut: zoom > ZOOM_STEPS[0] + 0.001,
   });
+}
+
+function currentZoom() {
+  if (!siteView) return 1;
+  try {
+    return siteView.webContents.getZoomFactor();
+  } catch {
+    return 1;
+  }
+}
+
+/** Set the site zoom, remember it for next launch, refresh the nav bar. */
+function applyZoom(factor) {
+  if (!siteView) return;
+  const f = Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], factor));
+  try {
+    siteView.webContents.setZoomFactor(f);
+  } catch {
+    return;
+  }
+  settings.zoomFactor = f;
+  saveSettings(settings);
+  pushNavState();
+}
+
+/** Move one step up/down the zoom ladder, from wherever the zoom sits. */
+function stepZoom(dir) {
+  const cur = currentZoom();
+  let idx = 0;
+  let best = Infinity;
+  ZOOM_STEPS.forEach((s, i) => {
+    const d = Math.abs(s - cur);
+    if (d < best) {
+      best = d;
+      idx = i;
+    }
+  });
+  // Between steps (e.g. after Ctrl+wheel), head to the next step in the
+  // requested direction rather than snapping to the nearest one.
+  if (dir > 0 && ZOOM_STEPS[idx] <= cur) idx = Math.min(ZOOM_STEPS.length - 1, idx + 1);
+  if (dir < 0 && ZOOM_STEPS[idx] >= cur) idx = Math.max(0, idx - 1);
+  applyZoom(ZOOM_STEPS[idx]);
 }
 
 function setSidebarVisible(visible) {
@@ -998,6 +1059,9 @@ function registerIpc() {
   ipcMain.on('nav:reload', () => {
     if (siteView) siteView.webContents.reload();
   });
+  ipcMain.on('nav:zoomIn', () => stepZoom(1));
+  ipcMain.on('nav:zoomOut', () => stepZoom(-1));
+  ipcMain.on('nav:zoomReset', () => applyZoom(1));
 
   ipcMain.handle('assets:list', (_e, workspaceId) => assets.list(workspaceId || null));
   ipcMain.handle('assets:stats', (_e, workspaceId) => assets.stats(workspaceId || null));

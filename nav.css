@@ -31,6 +31,10 @@ body {
 
 .nav-group { display: flex; align-items: center; gap: 4px; }
 
+.nav-sep { width: 1px; height: 18px; background: var(--line); margin: 0 7px; }
+
+.zoom-label { width: auto; min-width: 46px; padding: 0 6px; font-size: 12px; }
+
 .nav-btn {
   width: 30px;
   height: 26px;
