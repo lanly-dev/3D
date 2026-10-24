@@ -233,6 +233,62 @@ function assign(id, workspaceId) {
   return updated;
 }
 
+/**
+ * Rename an asset's file in place (same folder). The sidebar edits the
+ * base name without extension, so the extension — and with it the kind —
+ * is kept, and a model's generated Blender script (<name>.blender.py)
+ * is renamed along with it, companion record included (same moves-map
+ * pattern as assign). A clash with an existing file is refused rather
+ * than uniquified: a rename that silently lands elsewhere would confuse.
+ * Returns { ok, message? }.
+ */
+function rename(id, newBase) {
+  const all = readStore();
+  const rec = all.find((a) => a.id === String(id || ''));
+  if (!rec) return { ok: false, message: 'Asset not found' };
+  const base = String(newBase || '').trim();
+  if (!base || base === '.' || base === '..' || /[/\\]/.test(base) || /[\u0000-\u001f]/.test(base)) {
+    return { ok: false, message: 'Invalid name' };
+  }
+  const src = path.resolve(rec.filePath);
+  const ext = path.extname(src);
+  const dest = path.join(path.dirname(src), base + ext);
+  if (dest === src) return { ok: false, message: 'Same name' };
+  if (!fs.existsSync(src)) return { ok: false, message: 'File not found' };
+  // A case-only rename (chair.glb -> Chair.glb) is the same file on
+  // Windows, so it must not trip the clash check.
+  if (dest.toLowerCase() !== src.toLowerCase() && fs.existsSync(dest)) {
+    return { ok: false, message: 'A file with that name already exists' };
+  }
+  const moves = new Map(); // old absolute path -> new absolute path
+  fs.renameSync(src, dest);
+  moves.set(src, dest);
+  if (classify(src) === 'model') {
+    const companion = path.join(path.dirname(src), `${path.basename(src, ext)}.blender.py`);
+    const compDest = path.join(path.dirname(src), `${base}.blender.py`);
+    if (fs.existsSync(companion) && !fs.existsSync(compDest)) {
+      try {
+        fs.renameSync(companion, compDest);
+        moves.set(path.resolve(companion), compDest);
+      } catch { /* companion stays put; the model rename still stands */ }
+    }
+  }
+  const now = Date.now();
+  const next = all.map((a) => {
+    const np = moves.get(path.resolve(a.filePath));
+    if (!np) return a;
+    return {
+      ...a,
+      filePath: np,
+      fileName: path.basename(np),
+      name: path.basename(np, path.extname(np)),
+      updatedAt: now,
+    };
+  });
+  writeStore(next);
+  return { ok: true };
+}
+
 /** Forget an asset (does not touch the file on disk). */
 function remove(id) {
   const assets = readStore();
@@ -318,6 +374,7 @@ module.exports = {
   track,
   linkCode,
   assign,
+  rename,
   patch,
   remove,
   find,

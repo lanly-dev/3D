@@ -68,6 +68,49 @@ function setStatus(text) {
   $('status').textContent = text;
 }
 
+/**
+ * Turn an asset's name into an inline editor (double-click to rename).
+ * Edits the base name only — the extension stays, so the file keeps its
+ * kind and a model's companion script keeps matching. Enter commits,
+ * Escape cancels, blur commits if it hasn't already. The list refreshes
+ * from the main process after a successful rename.
+ */
+function startRename(nameEl, asset) {
+  if (nameEl.querySelector('input')) return;
+  const input = document.createElement('input');
+  input.className = 'rename-input';
+  input.type = 'text';
+  input.value = asset.name;
+  input.setAttribute('aria-label', `Rename ${asset.name}`);
+  nameEl.textContent = '';
+  nameEl.appendChild(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    const next = input.value.trim();
+    nameEl.textContent = asset.name;
+    if (!commit || !next || next === asset.name) return;
+    if (typeof bridge.rename !== 'function') {
+      setStatus('Rename unavailable — restart the app to load the new sidebar');
+      return;
+    }
+    bridge.rename(asset.id, next).then((res) => {
+      setStatus(res && res.ok ? 'Renamed' : (res && res.message) || 'Rename failed');
+    }).catch((err) => {
+      setStatus('Rename failed: ' + (err && err.message ? err.message : err));
+    });
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+    e.stopPropagation();
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
 function visibleAssets() {
   const q = state.filter.trim().toLowerCase();
   return state.assets.filter((a) => {
@@ -183,6 +226,11 @@ function renderList() {
     const name = document.createElement('span');
     name.className = 'item-name';
     name.textContent = a.name;
+    name.title = 'Double-click to rename this file';
+    name.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      startRename(name, a);
+    });
     top.append(badge, name);
 
     const meta = document.createElement('div');
@@ -439,6 +487,18 @@ $('kind').addEventListener('change', (e) => {
 $('refresh').addEventListener('click', () => {
   refresh();
   setStatus('Refreshed');
+});
+
+// Clicking the status line copies its message (e.g. an error to paste
+// into a bug report). 'Copied' shows briefly, then the message returns.
+$('status').addEventListener('click', () => {
+  const el = $('status');
+  const text = el.textContent || '';
+  if (!text || text === 'Copied' || typeof bridge.copy !== 'function') return;
+  bridge.copy(text).then(() => {
+    el.textContent = 'Copied';
+    setTimeout(() => { if (el.textContent === 'Copied') el.textContent = text; }, 1200);
+  });
 });
 
 $('scan').addEventListener('click', async () => {

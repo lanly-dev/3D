@@ -341,10 +341,21 @@ body.collapsed .grip { width: 4px; }
 .badge.model { color: #bcd4ff; background: rgba(76,141,255,.15); }
 .badge.blender-code { color: #ffd9a8; background: rgba(242,181,68,.16); }
 .item-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 550;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.item-name .rename-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  color: var(--fg);
+  border-radius: 5px;
+  font: inherit;
+  padding: 1px 4px;
 }
 .item-meta {
   color: var(--fg-dim);
@@ -417,4 +428,4 @@ body.collapsed .grip { width: 4px; }
   color: var(--fg-dim);
   font-size: 11px;
 }
-#status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }

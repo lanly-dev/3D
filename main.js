@@ -31,6 +31,7 @@ const {
   session,
   Menu,
   shell,
+  clipboard,
   Notification,
   dialog,
   ipcMain,
@@ -1197,6 +1198,18 @@ function registerIpc() {
     const p = String(filePath || '');
     const buf = fs.readFileSync(p);
     return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  });
+  // Rename an asset's file in place, then refresh the sidebar.
+  ipcMain.handle('assets:rename', (_e, id, newName) => {
+    const res = assets.rename(String(id || ''), String(newName || ''));
+    if (res.ok) notifySidebar();
+    return res;
+  });
+  // Copy the sidebar status line to the clipboard (main process owns the
+  // clipboard API; the renderer must not depend on navigator.clipboard).
+  ipcMain.handle('sidebar:copy', (_e, text) => {
+    clipboard.writeText(String(text || ''));
+    return true;
   });
   ipcMain.handle('assets:convert', async (_e, id) => {
     const found = assets.find(String(id || ''));

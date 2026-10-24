@@ -21,7 +21,9 @@ A small desktop wrapper around the Hunyuan3D web app
   zoom choice persists across restarts.
 - **Workspaces** — named folders that own a project and its assets.
 - **Asset sidebar** — an index of tracked models and generated scripts, with
-  filters, per-asset actions, and a workspace scope.
+  filters, per-asset actions, and a workspace scope. Double-click a name
+  to rename the file in place (a model's companion script is renamed
+  along with it); clicking the status line copies its message.
 - **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
   instead of the machine's default app: orbit / zoom / pan, wireframe,
   auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY
