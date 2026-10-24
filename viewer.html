@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The import map is an inline script, so the CSP needs its hash.
+         If the import map below changes, recompute it (sha256 of the exact
+         text between <script type="importmap"> and </script>) and update
+         the hash here. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self' 'sha256-mpAYHjxf9UQwzjPXl6zDbUDmmDa2rewAQLxARrr8Slo=';" />
+    <title>3D Viewer</title>
+    <link rel="stylesheet" href="viewer.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js",
+          "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="toolbar">
+      <span id="name">Loading…</span>
+      <span class="spacer"></span>
+      <button id="wireframe" title="Toggle wireframe">Wireframe</button>
+      <button id="rotate" title="Toggle auto-rotate">Rotate</button>
+      <button id="grid" title="Toggle ground grid">Grid</button>
+      <button id="reset" title="Reset camera">Reset</button>
+    </div>
+    <div id="status"></div>
+    <div id="viewport"></div>
+    <script type="module" src="viewer.js"></script>
+  </body>
+</html>

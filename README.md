@@ -22,6 +22,10 @@ A small desktop wrapper around the Hunyuan3D web app
 - **Workspaces** — named folders that own a project and its assets.
 - **Asset sidebar** — an index of tracked models and generated scripts, with
   filters, per-asset actions, and a workspace scope.
+- **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
+  instead of the machine's default app: orbit / zoom / pan, wireframe,
+  auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY
+  and FBX; other files still open with the default app.
 - **MeshCoder** (optional) — converts a mesh into part-segmented, editable
   Blender Python code using a local MeshCoder install.
 - **Compounding engine** — accumulates the parts produced by every conversion

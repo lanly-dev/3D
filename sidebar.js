@@ -227,10 +227,12 @@ function renderList() {
     const open = document.createElement('button');
     open.className = 'btn icon-btn';
     open.innerHTML = icon(ICONS.open);
-    open.title = 'Open this file with its default app';
+    open.title = a.kind === 'model' ? 'View in the in-app 3D viewer' : 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
-      bridge.open(a.filePath).then((ok) => setStatus(ok ? 'Opened' : 'Cannot open this file'));
+      bridge.view(a.id).then((res) => {
+        if (res && res.ok === false) setStatus(res.message || 'Cannot open this file');
+      });
     });
     actions.append(reveal, open, move);
 

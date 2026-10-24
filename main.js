@@ -70,6 +70,7 @@ let mainWindow = null;
 let sidebarView = null;
 let siteView = null;
 let navView = null;
+const viewerWindows = new Set();
 let sidebarVisible = true;
 let sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
 
@@ -536,6 +537,29 @@ function saveLayout() {
   } catch {
     /* non-fatal */
   }
+}
+
+/**
+ * Open a model in the in-app 3D viewer window (Three.js). The file path
+ * travels as a URL query; the bytes travel over IPC when the page asks.
+ */
+function openViewer(filePath) {
+  const win = new BrowserWindow({
+    width: 1000,
+    height: 750,
+    minWidth: 640,
+    minHeight: 480,
+    title: `Viewer — ${path.basename(filePath)}`,
+    webPreferences: {
+      preload: path.join(__dirname, 'viewer-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  viewerWindows.add(win);
+  win.on('closed', () => viewerWindows.delete(win));
+  win.loadFile(path.join(__dirname, 'viewer.html'), { query: { file: filePath } });
+  return win;
 }
 
 /**
@@ -1151,6 +1175,24 @@ function registerIpc() {
     const p = String(filePath || '');
     if (!p || !fs.existsSync(p)) return false;
     return shell.openPath(p).then(() => true).catch(() => false);
+  });
+  // Open an asset: models go to the in-app 3D viewer, everything else to
+  // the machine's default app.
+  ipcMain.handle('assets:view', (_e, id) => {
+    const found = assets.find(String(id || ''));
+    if (!found || !fs.existsSync(found.filePath)) return { ok: false, message: 'File not found' };
+    if (found.kind === 'model') {
+      openViewer(found.filePath);
+      return { ok: true };
+    }
+    return shell.openPath(found.filePath).then(() => ({ ok: true })).catch(() => ({ ok: false, message: 'Cannot open this file' }));
+  });
+  // The viewer window's file bytes, as a clean ArrayBuffer (a Node Buffer
+  // would arrive with a pooled backing store and a nonzero byteOffset).
+  ipcMain.handle('viewer:readFile', (_e, filePath) => {
+    const p = String(filePath || '');
+    const buf = fs.readFileSync(p);
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   });
   ipcMain.handle('assets:convert', async (_e, id) => {
     const found = assets.find(String(id || ''));
