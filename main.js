@@ -180,6 +180,51 @@ function pageTranslator() {
     var next = cur.match(/^\s*/)[0] + dst + cur.match(/\s*$/)[0];
     applied.set(node, next);
     node.nodeValue = next;
+    // English runs longer than the Chinese it replaces, so a translated
+    // label can spill past its button or tab. If it does, shrink the
+    // overflowing container's font until it fits (floor: 70% of the
+    // original size — readability wins over a perfect fit).
+    fitText(node);
+  }
+
+  var fitOriginal = new WeakMap(); // element -> its original font size (px)
+
+  function fitText(node) {
+    var el = node.parentElement;
+    var depth = 0;
+    while (el && el !== document.body && depth < 4) {
+      depth++;
+      var cs = null;
+      try {
+        cs = window.getComputedStyle(el);
+      } catch (e) {}
+      var overflowing =
+        el.scrollWidth > el.clientWidth + 1 ||
+        (cs &&
+          (cs.overflowY === 'hidden' || cs.overflowY === 'clip') &&
+          el.scrollHeight > el.clientHeight + 1);
+      if (overflowing) {
+        var base = fitOriginal.get(el);
+        if (!base) {
+          base = (cs && parseFloat(cs.fontSize)) || 16;
+          fitOriginal.set(el, base);
+        }
+        var size = base;
+        var floor = base * 0.7;
+        while (
+          size > floor &&
+          (el.scrollWidth > el.clientWidth + 1 ||
+            (cs &&
+              (cs.overflowY === 'hidden' || cs.overflowY === 'clip') &&
+              el.scrollHeight > el.clientHeight + 1))
+        ) {
+          size = Math.max(floor, size * 0.92);
+          el.style.fontSize = size + 'px';
+        }
+        return;
+      }
+      el = el.parentElement;
+    }
   }
 
   function applyAttr(el, attr, src, dst) {
@@ -588,9 +633,14 @@ function createMainWindow() {
   siteView.webContents.on('did-navigate', pushNavState);
   siteView.webContents.on('did-navigate-in-page', pushNavState);
   siteView.webContents.on('did-finish-load', () => {
-    // Re-apply the saved zoom (Chromium forgets it across restarts),
-    // then refresh the nav bar state.
-    if (settings.zoomFactor && settings.zoomFactor !== 1) {
+    // Apply the saved zoom — and on first launch, default to 75%,
+    // because the site renders big. (Chromium forgets zoom across
+    // restarts, so it is re-applied on every load.)
+    if (settings.zoomFactor == null) {
+      settings.zoomFactor = 0.75;
+      saveSettings(settings);
+    }
+    if (settings.zoomFactor !== 1) {
       try {
         siteView.webContents.setZoomFactor(settings.zoomFactor);
       } catch {

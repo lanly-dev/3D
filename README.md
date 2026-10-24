@@ -14,6 +14,11 @@ A small desktop wrapper around the Hunyuan3D web app
   + `Accept-Language`) and machine-translates whatever still renders in
   Chinese with a small built-in translator that calls Google Translate's
   free endpoint directly — no Google widget, no banner or floating button.
+  Translated text that would overflow its button or tab is shrunk to fit
+  (never below 70% of its size).
+- **Navigation bar** — back / forward / reload buttons and zoom controls
+  (− / % / +) under the app menu; the site defaults to 75% zoom, and the
+  zoom choice persists across restarts.
 - **Workspaces** — named folders that own a project and its assets.
 - **Asset sidebar** — an index of tracked models and generated scripts, with
   filters, per-asset actions, and a workspace scope.
