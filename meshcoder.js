@@ -20,6 +20,9 @@
  * the usual folders, and a python by torch + trimesh in its site-packages.
  * Detection only fills gaps — an explicitly set value always wins — and a
  * successful detection is saved to meshcoder.json so it runs once.
+ * If no clone exists anywhere, the app offers to download one into
+ * Documents/Hunyuan3D/MeshCoder (see cloneRepo) — that folder is checked
+ * first by detection.
  *
  * Expected layout under MESHCODER_HOME (per MeshCoder's README):
  *   llama-3-models/Llama3.2-1B/           base model
@@ -39,6 +42,16 @@ const INFERENCE_REL = path.join(
   'custom_inference',
   'inference_shape2code_point_input.py'
 );
+
+const REPO_URL = 'https://github.com/InternRobotics/MeshCoder';
+
+/**
+ * Where the app clones MeshCoder when the user accepts the download offer:
+ * Documents/Hunyuan3D/MeshCoder (next to the app's other on-disk home).
+ */
+function downloadDest() {
+  return path.join(os.homedir(), 'Documents', 'Hunyuan3D', 'MeshCoder');
+}
 
 function configPath() {
   return path.join(app.getPath('userData'), 'meshcoder.json');
@@ -75,6 +88,8 @@ function saveConfig(cfg) {
 function homeCandidates() {
   const home = os.homedir();
   const dirs = [
+    // The app's own managed download location wins over a stray clone.
+    path.join(home, 'Documents', 'Hunyuan3D', 'MeshCoder'),
     path.join(home, 'MeshCoder'),
     path.join(home, 'meshcoder'),
     path.join(home, 'Documents', 'MeshCoder'),
@@ -268,6 +283,26 @@ function detectAndSave() {
   return { cfg, newly };
 }
 
+/**
+ * Clone the MeshCoder code into `dest` (shallow — the multi-GB checkpoints
+ * are a separate download, not part of the repo). Resolves with `dest`.
+ * Rejects with a readable error (git missing, network failure, git's own
+ * stderr tail) for the caller to show.
+ */
+async function cloneRepo(dest = downloadDest(), repoUrl = REPO_URL) {
+  if (fs.existsSync(path.join(dest, INFERENCE_REL))) return dest; // already there
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  try {
+    await run('git', ['clone', '--depth', '1', repoUrl, dest]);
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      throw new Error('git was not found on PATH — install Git for Windows, or clone MeshCoder manually.');
+    }
+    throw err;
+  }
+  return dest;
+}
+
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { ...opts, windowsHide: true });
@@ -360,4 +395,4 @@ async function convertToCode(meshPath, outDir) {
   return codePath;
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL };

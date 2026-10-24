@@ -980,21 +980,7 @@ async function convertLastDownload() {
     });
     return;
   }
-  if (!meshcoder.isConfigured()) {
-    const detected = meshcoder.detectAndSave();
-    if (!meshcoder.isConfigured(detected.cfg)) {
-      await dialog.showMessageBox(win, {
-        type: 'warning',
-        message: 'MeshCoder is not configured',
-        detail:
-          'Auto-detection looked in the usual clone folders and conda envs and found nothing. ' +
-          'Point the app at your local MeshCoder install via Tools → Open MeshCoder config ' +
-          '(set "home" and "python"), or the MESHCODER_HOME / MESHCODER_PYTHON env vars. ' +
-          'See the MeshCoder section of the README for the full setup.',
-      });
-      return;
-    }
-  }
+  if (!(await ensureMeshcoder(win))) return;
   converting = true;
   new Notification({
     title: 'Hunyuan3D',
@@ -1119,16 +1105,68 @@ async function deleteAssetFile(id) {
   }
 }
 
+/**
+ * Make sure MeshCoder is usable: detect first; if no clone exists anywhere,
+ * offer to download it into Documents/Hunyuan3D/MeshCoder and detect again
+ * (its Python env may already be present). Returns true when a conversion
+ * can proceed. Shows its own dialogs; the false paths are already explained
+ * (or the user declined the download).
+ */
+async function ensureMeshcoder(win) {
+  if (meshcoder.isConfigured()) return true;
+  meshcoder.detectAndSave();
+  if (meshcoder.isConfigured()) return true;
+  if (!meshcoder.loadConfig().home) {
+    // No clone anywhere — offer the managed download.
+    const dest = meshcoder.downloadDest();
+    const res = await dialog.showMessageBox(win, {
+      type: 'question',
+      buttons: ['Download', 'Not now'],
+      defaultId: 0,
+      cancelId: 1,
+      message: 'MeshCoder not found',
+      detail: `Download the MeshCoder code into ${dest}?\n\nIt is cloned from ${meshcoder.REPO_URL} (needs git on PATH). The Python env and the model checkpoints are still set up separately — see the MeshCoder section of the README.`,
+    });
+    if (res.response !== 0) return false;
+    new Notification({ title: 'Hunyuan3D', body: 'Downloading MeshCoder…' }).show();
+    try {
+      await meshcoder.cloneRepo(dest);
+    } catch (err) {
+      await dialog.showMessageBox(win, {
+        type: 'error',
+        message: 'MeshCoder download failed',
+        detail: String(err && err.message ? err.message : err),
+      });
+      return false;
+    }
+    const after = meshcoder.detectAndSave();
+    if (!after.cfg.home) {
+      await dialog.showMessageBox(win, {
+        type: 'warning',
+        message: 'Downloaded, but the clone was not recognized',
+        detail: `Expected MeshCoder's inference script under ${dest}. Check the folder, or point the app at a clone via Tools → Open MeshCoder config.`,
+      });
+      return false;
+    }
+    new Notification({ title: 'Hunyuan3D', body: `MeshCoder downloaded to ${dest}` }).show();
+  }
+  if (meshcoder.isConfigured()) return true;
+  await dialog.showMessageBox(win, {
+    type: 'warning',
+    message: 'MeshCoder still needs its Python env',
+    detail: 'The code is in place, but no Python with torch + trimesh was found. Create the conda env per the MeshCoder README, then run Tools → Detect MeshCoder automatically.',
+  });
+  return false;
+}
+
 async function detectMeshcoder() {
   const win = focusedWindow();
-  const { cfg, newly } = meshcoder.detectAndSave();
-  const configured = meshcoder.isConfigured(cfg);
+  if (!(await ensureMeshcoder(win))) return; // already explained, or declined
+  const cfg = meshcoder.loadConfig();
   await dialog.showMessageBox(win, {
-    type: configured ? 'info' : 'warning',
-    message: configured ? 'MeshCoder detected' : 'MeshCoder not found',
-    detail: configured
-      ? `Home: ${cfg.home}${newly.home ? ' (auto-detected)' : ''}\nPython: ${cfg.python}${newly.python ? ' (auto-detected)' : ''}\n\nSaved to ${meshcoder.configPath()}.`
-      : 'Auto-detection looked in the usual clone folders (~/MeshCoder, ~/Documents/GitHub, ~/source/repos), conda envs, and PATH pythons with torch + trimesh, and found nothing. Set it via Tools → Open MeshCoder config or the MESHCODER_HOME / MESHCODER_PYTHON env vars.',
+    type: 'info',
+    message: 'MeshCoder ready',
+    detail: `Home: ${cfg.home}\nPython: ${cfg.python}\n\nSaved to ${meshcoder.configPath()}.`,
   });
 }
 
@@ -1451,11 +1489,8 @@ function registerIpc() {
     // Re-resolve the workspace (it may have been inferred from the folder).
     const asset = assets.findByPath(found.filePath) || found;
     if (converting) return { message: 'A conversion is already running' };
-    if (!meshcoder.isConfigured()) {
-      const detected = meshcoder.detectAndSave();
-      if (!meshcoder.isConfigured(detected.cfg)) {
-        return { message: 'MeshCoder is not configured and auto-detection found nothing — see Tools → Detect MeshCoder automatically' };
-      }
+    if (!(await ensureMeshcoder(focusedWindow()))) {
+      return { message: 'MeshCoder is not set up — see the dialog, or Tools → Detect MeshCoder automatically' };
     }
     converting = true;
     notifySidebar();

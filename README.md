@@ -82,12 +82,16 @@ touches the file on disk.
 MeshCoder runs in its own Python env (needs a CUDA GPU) — it does not run
 inside Electron.
 
-1. Clone MeshCoder and create its conda env per its README (Python 3.10,
-   PyTorch 2.4.1 + CUDA 11.8). WSL2 is the smoother path on Windows.
-2. Download the checkpoints into `MeshCoder/llama-3-models/`:
+1. Get the MeshCoder code. If no clone is found, the app offers to download
+   it for you into `Documents/Hunyuan3D/MeshCoder` (a shallow `git clone`;
+   git must be on PATH). Cloning it yourself into any of the usual folders
+   works too.
+2. Create its conda env per its README (Python 3.10, PyTorch 2.4.1 +
+   CUDA 11.8). WSL2 is the smoother path on Windows.
+3. Download the checkpoints into `MeshCoder/llama-3-models/`:
    `Llama3.2-1B/` (base model) and `object_to_code_model/` (tokenizer + LoRA).
-3. Point the app at it via **Tools → Open MeshCoder config** (`home`, `python`)
-   or the `MESHCODER_HOME` / `MESHCODER_PYTHON` env vars. Step 3 is usually
+4. Point the app at it via **Tools → Open MeshCoder config** (`home`, `python`)
+   or the `MESHCODER_HOME` / `MESHCODER_PYTHON` env vars. Step 4 is usually
    unnecessary: **Tools → Detect MeshCoder automatically** (and every
    conversion attempt) finds a clone in the usual folders and a conda env
    with torch + trimesh, and saves them to the config.
