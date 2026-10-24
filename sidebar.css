@@ -140,7 +140,8 @@ body.collapsed .grip { width: 4px; }
   font: inherit;
   min-width: 0;
 }
-.toolbar input { flex: 1 1 auto; }
+.toolbar input { flex: 1 1 auto; min-width: 0; }
+.toolbar select { min-width: 0; }
 .toolbar input::placeholder { color: var(--fg-dim); }
 
 .btn {
@@ -372,8 +373,11 @@ body.collapsed .grip { width: 4px; }
   gap: 8px;
   flex-wrap: wrap;
 }
-.item-actions { display: flex; gap: 6px; margin-top: 8px; }
+.item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .item-actions .btn { padding: 3px 8px; font-size: 11px; }
+/* The Move-to select must be allowed to shrink/wrap — a <select> otherwise
+   keeps its intrinsic width and pushes the row past the card edge. */
+.item-actions .assign { flex: 1 1 96px; min-width: 0; max-width: none; }
 
 .empty {
   color: var(--fg-dim);
