@@ -334,7 +334,7 @@ function run(cmd, args, opts = {}) {
  * active workspace so generated code lands in the project folder).
  */
 async function convertToCode(meshPath, outDir, opts = {}) {
-  const { onLog, onPhase, registerChild, onSyntaxIssue } = opts;
+  const { onLog, onPhase, registerChild, onSyntaxIssue, onGateNotes } = opts;
   // With a log sink, stream the child's output live; without one, buffer it.
   const exec = onLog ? (cmd, args, runOpts) => runStreaming(cmd, args, { onLog, registerChild, ...runOpts }) : run;
   let cfg = loadConfig();
@@ -362,10 +362,13 @@ async function convertToCode(meshPath, outDir, opts = {}) {
   }
   const codePath = path.join(dir, `${base}.blender.py`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meshcoder-'));
-  const npzPath = path.join(tmp, 'points.npz');
+  const splitDir = path.join(tmp, 'split');
 
   const modelDir = path.join(cfg.home, 'llama-3-models');
-  const runInference = async (destPath, doSample) => {
+  // Greedy decoding, always: the same mesh must produce the same
+  // code. Correctness comes from short per-part generations plus the
+  // gate below — never from re-rolling the sampler.
+  const runInference = async (npzPath, destPath) => {
     if (onPhase) onPhase('generating');
     await exec(
       cfg.python,
@@ -382,42 +385,119 @@ async function convertToCode(meshPath, outDir, opts = {}) {
         '--batch_size',
         '1',
         '--max_new_tokens',
-        '5000',
+        '12288',
         '--zero_out_normals',
         'True',
         '--do_sample',
-        doSample ? 'True' : 'False',
+        'False',
       ],
       { cwd: cfg.home }
     );
   };
 
   try {
-    // 1. mesh -> point-cloud NPZ (trimesh lives in the MeshCoder env already)
+    // 1. mesh -> one NPZ per shell, all in one global frame (trimesh
+    // lives in the MeshCoder env already). A single-shell mesh yields
+    // exactly one part — the classic whole-object conversion.
     if (onPhase) onPhase('sampling');
-    await exec(cfg.python, [path.join(__dirname, 'mesh-to-npz.py'), meshPath, npzPath]);
-
-    // 2. NPZ -> Blender code (MeshCoder single-GPU inference, greedy)
-    await runInference(codePath, false);
-
-    if (!fs.existsSync(codePath)) {
-      throw new Error('MeshCoder finished but produced no code file.');
+    await exec(cfg.python, [path.join(__dirname, 'mesh-to-npz.py'), meshPath, splitDir, '--split']);
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(splitDir, 'manifest.json'), 'utf8'));
+    } catch {
+      throw new Error('Mesh splitting produced no manifest — the mesh could not be sampled.');
+    }
+    const partFiles = Array.isArray(manifest.parts) ? manifest.parts : [];
+    if (!partFiles.length) throw new Error('Mesh splitting found no convertible parts.');
+    const gateNotes = [];
+    if (partFiles.length > 1 && onLog) {
+      onLog(`Split into ${partFiles.length} parts by shell — one short generation each`);
+    }
+    if (manifest.droppedAreaFraction >= 0.005) {
+      gateNotes.push(
+        `${(manifest.droppedAreaFraction * 100).toFixed(1)}% of the surface was tiny fragments and was not converted`
+      );
     }
 
-    // 3. MeshCoder's output is model-generated code and is not
-    // guaranteed to be valid Python (a merged create_curve call with
-    // mismatched brackets shipped once). Parse it now and flag a bad
-    // line — at conversion time, not inside Blender later. The check
-    // itself never modifies the file; a flagged file can be
-    // re-checked after a hand fix via the asset row's Verify menu
-    // item. A syntax issue does not fail the conversion.
+    // 2. One short generation per part. Long single generations are
+    // where MeshCoder's code falls apart (fused calls, truncation);
+    // per-part streams stay in the length range it handles cleanly.
+    const partCodes = [];
+    for (let i = 0; i < partFiles.length; i++) {
+      const destPath = path.join(tmp, `part-${i + 1}.py`);
+      if (partFiles.length > 1 && onLog) onLog(`Generating part ${i + 1} of ${partFiles.length}`);
+      await runInference(path.join(splitDir, partFiles[i].file), destPath);
+      if (!fs.existsSync(destPath)) {
+        throw new Error(`MeshCoder finished but produced no code for part ${i + 1}.`);
+      }
+      partCodes.push(fs.readFileSync(destPath, 'utf8'));
+    }
+
+    // 3. Deterministic repair per part (the Verify-and-fix passes:
+    // bracket repair, same-line splits, fused create_curve splits),
+    // then assembly + the correctness gate, which validates the
+    // assembled file against bpy_lib's contract and quarantines
+    // anything unfixable instead of shipping it broken.
+    const repairedCodes = [];
+    for (let i = 0; i < partCodes.length; i++) {
+      const label = partFiles.length > 1 ? `part ${i + 1}: ` : '';
+      try {
+        const rep = await repairSource(cfg.python, partCodes[i]);
+        if (rep && rep.status === 'fixed') {
+          repairedCodes.push(rep.fixed);
+          for (const c of rep.changes || []) gateNotes.push(label + c);
+          if (onLog) onLog(`Repair (${label.trim()}): ${(rep.changes || []).join('; ')}`);
+          continue;
+        }
+        if (rep && rep.status === 'unfixable') {
+          gateNotes.push(`${label}had damage the repair pass could not fix — the gate reviews it below`);
+        }
+      } catch {
+        /* repair is best-effort; the gate still reviews the raw code */
+      }
+      repairedCodes.push(partCodes[i]);
+    }
+    const bpyLibPath = path.join(cfg.home, 'src', 'llama_recipes', 'blender_scripts', 'bpy_lib.py');
+    const gated = await assembleAndGate(cfg.python, repairedCodes, fs.existsSync(bpyLibPath) ? bpyLibPath : '');
+    let finalSource;
+    if (gated && gated.source) {
+      finalSource = gated.source;
+      for (const n of gated.notes || []) gateNotes.push(n);
+    } else {
+      if (gated && gated.failed) {
+        for (const n of gated.notes || []) gateNotes.push(n);
+        gateNotes.push('the correctness gate could not make this file parse — delivered as generated');
+      } else {
+        gateNotes.push('the correctness gate did not run — delivered as generated');
+      }
+      finalSource = repairedCodes.join('\n');
+    }
+    if (partFiles.length > 1) gateNotes.unshift(`converted in ${partFiles.length} parts (split by shell)`);
+    if (onGateNotes) onGateNotes(gateNotes);
+    if (gateNotes.length) {
+      const block = [
+        '# --- Hunyuan3D conversion notes (correctness gate) ---',
+        ...gateNotes.map((n) => `# ${n}`),
+        '# Lines the gate removed are kept in the file as comments starting with "# [gate]".',
+        '# --- end conversion notes ---',
+        '',
+        '',
+      ].join('\n');
+      finalSource = block + finalSource;
+    }
+    fs.writeFileSync(codePath, finalSource);
+
+    // 4. Final parse check on what actually landed on disk. After
+    // the gate this should always pass; if the gate could not run,
+    // flag a bad line exactly as before — a syntax issue does not
+    // fail the conversion.
     const issue = await checkSyntax(cfg.python, codePath);
     if (issue) {
       if (onLog) onLog(`Syntax check: line ${issue.line} — ${issue.message}`);
       if (onSyntaxIssue) onSyntaxIssue(issue);
     }
 
-    // 4. Stamp the bpy_lib header (see stampBlenderHeader): without
+    // 5. Stamp the bpy_lib header (see stampBlenderHeader): without
     // it, running the script in Blender dies immediately with
     // ModuleNotFoundError: No module named 'bpy_lib'. Best-effort —
     // a stamping failure never fails the conversion.
@@ -880,6 +960,324 @@ async function repairFile(python, codePath) {
   return repairSource(python, source);
 }
 
+/**
+ * Assembly + correctness gate for per-part conversion output.
+ * Reads a JSON request on stdin — { parts: [code, ...], bpyLib } —
+ * and produces the final script:
+ *   1. boilerplate (imports / delete_all) is hoisted once, at the
+ *      top, no matter which part emitted it;
+ *   2. with more than one part, every object name a part defines is
+ *      prefixed (p1_, p2_, ...) and references inside the same part
+ *      (name= / profile_name= / seq_name=) are rewritten to match, so
+ *      parts cannot collide or cross-reference;
+ *   3. the assembled file is validated against bpy_lib's contract —
+ *      calls to functions bpy_lib does not have, and create_curve
+ *      calls whose point/handle arithmetic bpy_lib would reject
+ *      (including a non-string name, which silently builds nothing)
+ *      are quarantined: commented out, with the reason recorded;
+ *   4. if the file still does not parse, broken lines are
+ *      quarantined one at a time until it does (bounded).
+ * Prints NOTE lines, then STATUS ok + a byte-counted payload, or
+ * STATUS failed. Nothing is executed; ast only.
+ */
+const GATE_SRC = [
+  'import ast, json, sys',
+  'req = json.loads(sys.stdin.read())',
+  'parts = req.get("parts") or []',
+  'bpy_path = req.get("bpyLib") or ""',
+  'notes = []',
+  'lib_funcs = set()',
+  'if bpy_path:',
+  '    try:',
+  '        lib_tree = ast.parse(open(bpy_path, encoding="utf-8").read())',
+  '        for n in lib_tree.body:',
+  '            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):',
+  '                lib_funcs.add(n.name)',
+  '    except Exception:',
+  '        lib_funcs = set()',
+  'BUILTINS_OK = {"print", "len", "range", "enumerate", "zip", "list", "dict", "set", "tuple", "float", "int", "str", "bool", "min", "max", "abs", "round", "sorted", "isinstance", "type", "repr"}',
+  'BOILER = {"import bpy", "from math import radians, pi", "from bpy_lib import *", "delete_all()"}',
+  'def scan_bracket(s, start):',
+  '    depth = 0',
+  '    quote = None',
+  '    i = start',
+  '    while i < len(s):',
+  '        c = s[i]',
+  '        if quote:',
+  '            if c == quote:',
+  '                quote = None',
+  '        elif c == chr(34) or c == chr(39):',
+  '            quote = c',
+  '        elif c == "[":',
+  '            depth += 1',
+  '        elif c == "]":',
+  '            depth -= 1',
+  '            if depth == 0:',
+  '                return s[start:i + 1], i + 1',
+  '        i += 1',
+  '    return None',
+  'def scan_value(line, vstart):',
+  '    i = vstart',
+  '    while i < len(line) and line[i] == " ":',
+  '        i += 1',
+  '    if i >= len(line):',
+  '        return None, None',
+  '    if line[i] == "[":',
+  '        got = scan_bracket(line, i)',
+  '        if not got:',
+  '            return None, None',
+  '        try:',
+  '            return got[1], ast.literal_eval(got[0])',
+  '        except Exception:',
+  '            return None, None',
+  '    if line[i] == chr(34) or line[i] == chr(39):',
+  '        q = line[i]',
+  '        j = i + 1',
+  '        while j < len(line) and line[j] != q:',
+  '            j += 1',
+  '        if j >= len(line):',
+  '            return None, None',
+  '        try:',
+  '            return j + 1, ast.literal_eval(line[i:j + 1])',
+  '        except Exception:',
+  '            return None, None',
+  '    return None, None',
+  'def prefix_value(val, defined, prefix):',
+  '    if isinstance(val, str):',
+  '        return prefix + val if val in defined else None',
+  '    if isinstance(val, list):',
+  '        out = []',
+  '        changed = False',
+  '        for el in val:',
+  '            nv = prefix_value(el, defined, prefix)',
+  '            if nv is not None:',
+  '                changed = True',
+  '                out.append(nv)',
+  '            else:',
+  '                out.append(el)',
+  '        return out if changed else None',
+  '    return None',
+  'def rewrite_kwarg(line, kw, defined, prefix):',
+  '    key = kw + "="',
+  '    out = []',
+  '    i = 0',
+  '    while True:',
+  '        j = line.find(key, i)',
+  '        if j < 0:',
+  '            out.append(line[i:])',
+  '            break',
+  '        if j > 0 and (line[j - 1].isalnum() or line[j - 1] == "_"):',
+  '            out.append(line[i:j + len(key)])',
+  '            i = j + len(key)',
+  '            continue',
+  '        vend, val = scan_value(line, j + len(key))',
+  '        if vend is None:',
+  '            out.append(line[i:])',
+  '            break',
+  '        nv = prefix_value(val, defined, prefix)',
+  '        out.append(line[i:j + len(key)])',
+  '        out.append(repr(nv) if nv is not None else line[j + len(key):vend])',
+  '        i = vend',
+  '    return "".join(out)',
+  'def part_defined_names(code):',
+  '    defined = set()',
+  '    try:',
+  '        tree = ast.parse(code)',
+  '    except SyntaxError:',
+  '        return defined',
+  '    for n in ast.walk(tree):',
+  '        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):',
+  '            if n.func.id.startswith("create_") or n.func.id == "join_obj":',
+  '                for k in n.keywords:',
+  '                    if k.arg == "name" and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str):',
+  '                        defined.add(k.value.value)',
+  '    return defined',
+  'header = []',
+  'header_seen = set()',
+  'assembled = []',
+  'multi = len(parts) > 1',
+  'for idx, code in enumerate(parts):',
+  '    prefix = "p" + str(idx + 1) + "_"',
+  '    defined = part_defined_names(code) if multi else set()',
+  '    body = []',
+  '    for ln in code.split("\\n"):',
+  '        t = ln.strip()',
+  '        if t in BOILER:',
+  '            if t not in header_seen:',
+  '                header_seen.add(t)',
+  '                header.append(t)',
+  '            continue',
+  '        if t.startswith("# part ") or t == "# part separation":',
+  '            continue',
+  '        if multi and defined:',
+  '            for kw in ("name", "profile_name", "seq_name"):',
+  '                ln = rewrite_kwarg(ln, kw, defined, prefix)',
+  '        body.append(ln)',
+  '    while body and not body[0].strip():',
+  '        body.pop(0)',
+  '    while body and not body[-1].strip():',
+  '        body.pop()',
+  '    if multi:',
+  '        assembled.append("# ---- part " + str(idx + 1) + " of " + str(len(parts)) + " ----")',
+  '    assembled.extend(body)',
+  '    assembled.append("")',
+  'header = [h for h in header if h != "delete_all()"] + (["delete_all()"] if "delete_all()" in header_seen else [])',
+  'source = "\\n".join(header + [""] + assembled) if header else "\\n".join(assembled)',
+  'def curve_check(kw):',
+  '    name = kw.get("name")',
+  '    if not isinstance(name, str):',
+  '        return "create_curve name is not a single string — in Blender that call silently builds nothing"',
+  '    cp = kw.get("control_points")',
+  '    ht = kw.get("handle_type")',
+  '    if not isinstance(cp, list) or not isinstance(ht, list):',
+  '        return None',
+  '    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in ht):',
+  '        return "create_curve handle_type holds non-numeric values"',
+  '    num_cp = len(cp) - ht.count(3)',
+  '    if num_cp < 1:',
+  '        return "create_curve point/handle counts describe no bezier point"',
+  '    if len(ht) < 2 * num_cp:',
+  '        return "create_curve handle_type has " + str(len(ht)) + " entries for " + str(num_cp) + " points (needs " + str(2 * num_cp) + ") — Blender would die with IndexError"',
+  '    used = 0',
+  '    for i in range(num_cp):',
+  '        for side in (2 * i, 2 * i + 1):',
+  '            t = ht[side]',
+  '            if t not in (0, 1, 2, 3):',
+  '                return "create_curve handle_type value " + repr(t) + " is not a known handle kind"',
+  '            if t == 3:',
+  '                used += 1',
+  '            if side == 2 * i:',
+  '                used += 1',
+  '    if used != len(cp):',
+  '        return "create_curve would leave " + str(len(cp) - used) + " control points unused — bpy_lib asserts on that"',
+  '    return None',
+  'def validate(source):',
+  '    tree = ast.parse(source)',
+  '    lines = source.split("\\n")',
+  '    spans = []',
+  '    local_defs = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}',
+  '    for node in tree.body:',
+  '        if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):',
+  '            continue',
+  '        call = node.value',
+  '        if not isinstance(call.func, ast.Name):',
+  '            continue',
+  '        fname = call.func.id',
+  '        reason = None',
+  '        if lib_funcs and fname not in lib_funcs and fname not in local_defs and fname not in BUILTINS_OK:',
+  '            reason = fname + "(...) does not exist in bpy_lib — Blender would die with NameError"',
+  '        elif fname == "create_curve":',
+  '            kw = {}',
+  '            for k in call.keywords:',
+  '                try:',
+  '                    kw[k.arg] = ast.literal_eval(k.value)',
+  '                except Exception:',
+  '                    kw[k.arg] = None',
+  '            reason = curve_check(kw)',
+  '        if reason:',
+  '            spans.append((node.lineno - 1, (node.end_lineno or node.lineno) - 1, reason))',
+  '    if not spans:',
+  '        return source, True',
+  '    drop = {}',
+  '    for s0, e0, reason in spans:',
+  '        for i in range(s0, e0 + 1):',
+  '            drop[i] = reason',
+  '    out = []',
+  '    for i, ln in enumerate(lines):',
+  '        if i in drop:',
+  '            if (i - 1) not in drop:',
+  '                out.append("# [gate] removed: " + drop[i])',
+  '            out.append("# [gate] " + ln)',
+  '            notes.append("line " + str(i + 1) + ": " + drop[i])',
+  '        else:',
+  '            out.append(ln)',
+  '    new = "\\n".join(out)',
+  '    try:',
+  '        ast.parse(new)',
+  '        return new, True',
+  '    except SyntaxError:',
+  '        return source, False',
+  'def force_parseable(source):',
+  '    lines = source.split("\\n")',
+  '    for _ in range(30):',
+  '        try:',
+  '            ast.parse("\\n".join(lines))',
+  '            return "\\n".join(lines)',
+  '        except SyntaxError as e:',
+  '            ln = (e.lineno or 1) - 1',
+  '            if ln < 0 or ln >= len(lines):',
+  '                return None',
+  '            j = ln',
+  '            while j >= 0 and (lines[j].startswith("# [gate]") or not lines[j].strip()):',
+  '                j -= 1',
+  '            if j < 0:',
+  '                return None',
+  '            lines[j] = "# [gate] " + lines[j]',
+  '            notes.append("line " + str(j + 1) + ": could not be parsed (" + (e.msg or "syntax error") + ") — quarantined")',
+  '    return None',
+  'ok = True',
+  'try:',
+  '    source, ok = validate(source)',
+  'except SyntaxError:',
+  '    forced = force_parseable(source)',
+  '    if forced is None:',
+  '        ok = False',
+  '    else:',
+  '        source, ok = validate(forced)',
+  '        if not ok:',
+  '            source = forced',
+  'for n in notes:',
+  '    print("NOTE " + n)',
+  'if not ok:',
+  '    print("STATUS failed")',
+  '    sys.exit(0)',
+  'data = source.encode("utf-8")',
+  'sys.stdout.write("STATUS ok\\nBYTES " + str(len(data)) + "\\n")',
+  'sys.stdout.flush()',
+  'sys.stdout.buffer.write(data)',
+].join('\n');
+
+/**
+ * Assemble per-part outputs into the final script and run the
+ * correctness gate (see GATE_SRC). Resolves null when the gate tool
+ * itself fails; the caller then falls back to the raw parts.
+ */
+function assembleAndGate(python, partCodes, bpyLibPath) {
+  return new Promise((resolve) => {
+    let child;
+    const chunks = [];
+    try {
+      child = spawn(python, ['-c', GATE_SRC], { windowsHide: true });
+    } catch {
+      return resolve(null);
+    }
+    child.stdout.on('data', (d) => chunks.push(d));
+    child.on('error', () => resolve(null));
+    child.on('close', () => {
+      const buf = Buffer.concat(chunks);
+      const head = buf.toString('utf8', 0, Math.min(buf.length, 65536));
+      const notes = [];
+      const noteRe = /^NOTE (.*)$/gm;
+      let m;
+      while ((m = noteRe.exec(head)) !== null) notes.push(m[1].trim());
+      if (/^STATUS failed$/m.test(head)) return resolve({ failed: true, notes });
+      const bytesMatch = head.match(/^BYTES (\d+)$/m);
+      if (!/^STATUS ok$/m.test(head) || !bytesMatch) return resolve(null);
+      const n = Number(bytesMatch[1]);
+      const bytesIdx = buf.indexOf('BYTES ');
+      const nl = buf.indexOf(0x0a, bytesIdx);
+      if (nl < 0 || buf.length < nl + 1 + n) return resolve(null);
+      resolve({ source: buf.subarray(nl + 1, nl + 1 + n).toString('utf8'), notes });
+    });
+    try {
+      child.stdin.write(JSON.stringify({ parts: partCodes, bpyLib: bpyLibPath || '' }));
+      child.stdin.end();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Automatic setup (native Windows — no WSL2, no conda).              */
 /*                                                                    */
@@ -1255,4 +1653,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, repairSource, repairFile, stampBlenderHeader, blenderHeader, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, repairSource, repairFile, assembleAndGate, stampBlenderHeader, blenderHeader, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };

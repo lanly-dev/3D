@@ -125,18 +125,29 @@ uses conda), and download the checkpoints into
 torch + trimesh and save them to the config.
 
 Then use **Tools → Convert last download to Blender code**, or the **To
-Blender** button on a mesh row. After each conversion the app parses
-the generated script — MeshCoder's output is model-generated and
-occasionally contains a malformed line that Blender would reject —
-and flags a bad line (with its number) in the status bar. The only
-change made to the file is a small header stamped at the top that
-puts the MeshCoder clone's `blender_scripts` folder on `sys.path` —
-without it, Blender can't resolve the script's
-`from bpy_lib import *` and dies with `ModuleNotFoundError`. After
+Blender** button on a mesh row. Conversions are built for correctness,
+not luck: decoding is deterministic, and the mesh is first split into
+its shells (connected components) so MeshCoder generates **one short
+program per part** in a single shared coordinate frame — long
+whole-object generations are where its code falls apart (fused calls,
+truncation). A single-shell mesh converts whole, exactly as before.
+Each part's object names are prefixed (`p1_`, `p2_`, …) so parts
+can't collide, the parts are assembled under one header, and the
+result passes a **correctness gate**: the deterministic formatting
+repairs run first, then every call is validated against `bpy_lib`'s
+real contract — calls to functions `bpy_lib` doesn't have, and
+`create_curve` calls whose point/handle arithmetic it would reject,
+are commented out (`# [gate]`) with the reason recorded in a notes
+block at the top of the file instead of being shipped broken. The
+status bar reports the part count and gate activity. The file also
+gets a small header stamped at the top that puts the MeshCoder
+clone's `blender_scripts` folder on `sys.path` — without it, Blender
+can't resolve the script's `from bpy_lib import *` and dies with
+`ModuleNotFoundError`. Shells under 1% of the total surface are
+treated as fragments and skipped (noted in the file). After
 hand-fixing a line, right-click the script's row and choose
-**Verify and fix** to re-run the same check on demand — it also
-repairs the common formatting failures itself (backing the
-original up as `<file>.orig`) whenever the repaired file parses.
+**Verify and fix** to re-run the repair + validation on demand
+(backing the original up as `<file>.orig`).
 
 One more one-time step on the Blender side: `bpy_lib` imports
 `torch`, which Blender's Python doesn't ship. **Tools → Prepare

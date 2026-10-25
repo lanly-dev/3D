@@ -78,7 +78,7 @@ let converting = false;
 /* the status line and the whole log is written to userData.          */
 /* ------------------------------------------------------------------ */
 
-const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null };
+const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null, gateNotes: [] };
 
 function pushSidebarStatus(text) {
   if (sidebarView && !sidebarView.webContents.isDestroyed()) {
@@ -112,7 +112,26 @@ function conversionProgressOpts() {
     onSyntaxIssue: (issue) => {
       conversionUi.syntaxIssue = issue;
     },
+    onGateNotes: (notes) => {
+      conversionUi.gateNotes = Array.isArray(notes) ? notes : [];
+    },
   };
+}
+
+/**
+ * One-line summary of what the conversion's correctness gate did:
+ * how many parts the mesh split into, and anything that was repaired
+ * or quarantined. Empty string when nothing is worth reporting.
+ */
+function gateSummary() {
+  const notes = conversionUi.gateNotes || [];
+  if (!notes.length) return '';
+  const parts = notes.find((n) => n.startsWith('converted in '));
+  const rest = notes.filter((n) => n !== parts);
+  const bits = [];
+  if (parts) bits.push(parts.replace('converted in ', '').replace(' (split by shell)', ''));
+  if (rest.length) bits.push(`${rest.length} gate note${rest.length === 1 ? '' : 's'} (see the file header)`);
+  return bits.join(' · ');
 }
 
 function startConversionUi(filePath) {
@@ -121,6 +140,7 @@ function startConversionUi(filePath) {
   conversionUi.startedAt = Date.now();
   conversionUi.lines = [];
   conversionUi.syntaxIssue = null;
+  conversionUi.gateNotes = [];
   pushSidebarStatus(conversionStatusText());
   clearInterval(conversionUi.timer);
   conversionUi.timer = setInterval(() => {
@@ -1115,6 +1135,8 @@ async function convertLastDownload() {
       pushSidebarStatus(
         `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed (click to copy)${si.text ? `\n${si.text}` : ''}`
       );
+    } else if (gateSummary()) {
+      pushSidebarStatus(`Saved ${path.basename(codePath)} — ${gateSummary()}`);
     }
   } catch (err) {
     const report = conversionFailureReport(err);
@@ -2125,7 +2147,7 @@ function registerIpc() {
       return {
         message: si
           ? `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed${si.text ? `\n${si.text}` : ''}`
-          : `Saved ${path.basename(codePath)}`,
+          : `Saved ${path.basename(codePath)}${gateSummary() ? ` — ${gateSummary()}` : ''}`,
       };
     } catch (err) {
       const detail = String(err && err.message ? err.message : err);
