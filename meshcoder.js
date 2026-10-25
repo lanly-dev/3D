@@ -407,14 +407,26 @@ async function convertToCode(meshPath, outDir, opts = {}) {
     // 3. MeshCoder's output is model-generated code and is not
     // guaranteed to be valid Python (a merged create_curve call with
     // mismatched brackets shipped once). Parse it now and flag a bad
-    // line — at conversion time, not inside Blender later. The file
-    // itself is never modified here; a flagged file can be re-checked
-    // after a hand fix via the asset row's Verify menu item. A syntax
-    // issue does not fail the conversion.
+    // line — at conversion time, not inside Blender later. The check
+    // itself never modifies the file; a flagged file can be
+    // re-checked after a hand fix via the asset row's Verify menu
+    // item. A syntax issue does not fail the conversion.
     const issue = await checkSyntax(cfg.python, codePath);
     if (issue) {
       if (onLog) onLog(`Syntax check: line ${issue.line} — ${issue.message}`);
       if (onSyntaxIssue) onSyntaxIssue(issue);
+    }
+
+    // 4. Stamp the bpy_lib header (see stampBlenderHeader): without
+    // it, running the script in Blender dies immediately with
+    // ModuleNotFoundError: No module named 'bpy_lib'. Best-effort —
+    // a stamping failure never fails the conversion.
+    try {
+      if (stampBlenderHeader(codePath, cfg.home) && onLog) {
+        onLog('Stamped the bpy_lib path header');
+      }
+    } catch {
+      /* header is a convenience, not a requirement */
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -422,6 +434,44 @@ async function convertToCode(meshPath, outDir, opts = {}) {
   return codePath;
 }
 
+const HEADER_MARKER = '# --- Hunyuan3D header: bpy_lib path (auto-added) ---';
+
+/**
+ * The header prepended to every generated script. MeshCoder's code
+ * starts with `from bpy_lib import *`, and bpy_lib ships inside the
+ * clone (src/llama_recipes/blender_scripts) — a folder that is not on
+ * Blender's sys.path, so an unstamped script dies on its first import
+ * inside Blender. The header tries the clone location baked in at
+ * conversion time first, then the app's managed clone location.
+ */
+function blenderHeader(home) {
+  const scriptsDir = path.join(home || '', 'src', 'llama_recipes', 'blender_scripts');
+  return [
+    HEADER_MARKER,
+    '# MeshCoder code does `from bpy_lib import *`; bpy_lib ships inside the',
+    '# MeshCoder clone, so put its folder on sys.path before anything runs.',
+    'import os as _h3d_os, sys as _h3d_sys',
+    `for _h3d_p in (${JSON.stringify(scriptsDir)}, _h3d_os.path.join(_h3d_os.path.expanduser('~'), 'Documents', 'Hunyuan3D', 'MeshCoder', 'src', 'llama_recipes', 'blender_scripts')):`,
+    '    if _h3d_os.path.isdir(_h3d_p) and _h3d_p not in _h3d_sys.path:',
+    '        _h3d_sys.path.append(_h3d_p)',
+    '# --- end Hunyuan3D header ---',
+    '',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Prepend the bpy_lib header to a generated script. Idempotent: a
+ * file already carrying the marker is left alone. Returns true when
+ * the header was added. Only lines are added at the top — the model's
+ * code below is untouched.
+ */
+function stampBlenderHeader(codePath, home) {
+  const src = fs.readFileSync(codePath, 'utf8');
+  if (src.includes(HEADER_MARKER)) return false;
+  fs.writeFileSync(codePath, blenderHeader(home) + src);
+  return true;
+}
 
 const SYNTAX_CHECK_SRC = [
   'import ast, sys',
@@ -861,4 +911,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, stampBlenderHeader, blenderHeader, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };

@@ -122,10 +122,13 @@ Then use **Tools → Convert last download to Blender code**, or the **To
 Blender** button on a mesh row. After each conversion the app parses
 the generated script — MeshCoder's output is model-generated and
 occasionally contains a malformed line that Blender would reject —
-and flags a bad line (with its number) in the status bar; the file
-itself is never modified. After hand-fixing a line, right-click the
-script's row and choose **Verify** to re-run the same check on
-demand.
+and flags a bad line (with its number) in the status bar. The only
+change made to the file is a small header stamped at the top that
+puts the MeshCoder clone's `blender_scripts` folder on `sys.path` —
+without it, Blender can't resolve the script's
+`from bpy_lib import *` and dies with `ModuleNotFoundError`. After
+hand-fixing a line, right-click the script's row and choose
+**Verify** to re-run the same check on demand.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
