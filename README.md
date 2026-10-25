@@ -25,10 +25,13 @@ A small desktop wrapper around the Hunyuan3D web app
   to rename the file in place (a model's companion script is renamed
   along with it); clicking the status line copies its message; right-click
   a row for **Show in Explorer**, **Verify and fix** (generated Python
-  scripts only: re-runs the syntax check and, when the file doesn't
-  parse, repairs the formatting — bracket balance, statements merged
-  onto one line, a truncated tail — keeping a `<file>.orig` backup;
-  a repair is written only when the result parses), **Delete file**
+  scripts only: re-runs the syntax check and repairs the formatting
+  failures this generator produces — two curve loops fused into one
+  `create_curve` call (split back into per-loop calls; this one is
+  valid syntax but silently builds nothing in Blender, so it is
+  fixed even when the file parses), bracket balance, statements
+  merged onto one line, a truncated tail — keeping a `<file>.orig`
+  backup; a repair is written only when the result parses), **Delete file**
   (moves it to the Recycle Bin, with
   confirmation), or **Remove from list**. **F12** toggles DevTools on
   the focused view.

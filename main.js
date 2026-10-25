@@ -1200,7 +1200,10 @@ async function verifyAssetFile(id) {
     return 'Verify and fix needs the MeshCoder Python env — run Tools → Set up MeshCoder automatically… (or Detect) first.';
   }
   const issue = await meshcoder.checkSyntax(python, found.filePath);
-  if (!issue) return `Verify and fix: ${name} — parses cleanly. Blender can run it.`;
+  // The repair pass runs even when the file parses: a fused
+  // create_curve (two loops in one call, list-valued name) is valid
+  // syntax but silently builds nothing in Blender, so "parses" is
+  // not the same as "fine" for this generator's output.
   const repair = await meshcoder.repairFile(python, found.filePath);
   if (repair && repair.status === 'fixed' && typeof repair.fixed === 'string') {
     try {
@@ -1215,6 +1218,7 @@ async function verifyAssetFile(id) {
       return `Verify and fix: ${name} — fixed (${repair.changes.join('; ')}). Now parses cleanly. Original saved as ${name}.orig`;
     }
   }
+  if (!issue) return `Verify and fix: ${name} — parses cleanly. Blender can run it.`;
   return `Verify and fix: ${name} — ⚠ syntax error at line ${issue.line}: ${issue.message} — couldn't fix it automatically${issue.text ? `\n${issue.text}` : ''}`;
 }
 
