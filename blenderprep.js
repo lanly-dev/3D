@@ -127,9 +127,10 @@ async function runBlenderCapture(blender, args, { timeoutMs = 240000, registerCh
   fs.writeFileSync(errPath, '');
   const argList = args.map((a) => (/\s/.test(String(a)) ? `"${a}"` : String(a))).join(' ');
   const ps =
-    `$p = Start-Process -FilePath ${psQuote(blender.exe)} -ArgumentList ${psQuote(argList)} ` +
-    `-Wait -PassThru -NoNewWindow -RedirectStandardOutput ${psQuote(outPath)} ` +
-    `-RedirectStandardError ${psQuote(errPath)}; exit $p.ExitCode`;
+    `try { $p = Start-Process -FilePath ${psQuote(blender.exe)} -ArgumentList ${psQuote(argList)} ` +
+    `-Wait -PassThru -NoNewWindow -ErrorAction Stop -RedirectStandardOutput ${psQuote(outPath)} ` +
+    `-RedirectStandardError ${psQuote(errPath)}; exit $p.ExitCode } ` +
+    `catch { Write-Error $_; exit 1 }`;
   let streamed = 0;
   const poll = () => {
     if (!onData) return;
@@ -146,7 +147,14 @@ async function runBlenderCapture(blender, args, { timeoutMs = 240000, registerCh
       registerChild,
     });
     poll();
-    return { code: res.code, out: safeRead(outPath) + safeRead(errPath), via: 'powershell' };
+    // PowerShell's own output comes first: when Start-Process itself
+    // fails, its error lands there — an earlier version returned only
+    // the (empty) redirect files and threw the evidence away.
+    return {
+      code: res.code,
+      out: `${res.out || ''}\n${safeRead(outPath)}${safeRead(errPath)}`,
+      via: 'powershell',
+    };
   } finally {
     clearInterval(timer);
   }
@@ -410,14 +418,93 @@ function storeInstallScript(modulesDir) {
   ].join('\n');
 }
 
+/** The CPython version each Blender release bundles (4.x line). */
+const BLENDER_PYTHON = {
+  '3.6': '3.10',
+  '4.0': '3.10',
+  '4.1': '3.10',
+  '4.2': '3.11',
+  '4.3': '3.11',
+  '4.4': '3.11',
+  '4.5': '3.11',
+};
+
+function blenderPythonFor(version) {
+  return BLENDER_PYTHON[version] || '3.11';
+}
+
+/**
+ * pip arguments that install wheels for a DIFFERENT interpreter than
+ * the one running pip: Blender's Python version, Windows, CPython
+ * ABI, wheels only. This is what lets an unrelated Python (the
+ * MeshCoder env's 3.10) fetch a torch build that Blender 4.2's
+ * Python 3.11 can import — no Blender launch required, which matters
+ * for Store installs whose exe resists being launched at all.
+ */
+function foreignPipBase(modulesDir, version) {
+  const py = blenderPythonFor(version);
+  return [
+    '-m', 'pip', 'install',
+    '--target', modulesDir,
+    '--python-version', py,
+    '--implementation', 'cp',
+    '--abi', `cp${py.replace('.', '')}`,
+    '--platform', 'win_amd64',
+    '--only-binary=:all:',
+  ];
+}
+
+/** True when the compiled torch core for some CPython is in place. */
+function torchCompiledPresent(modulesDir) {
+  try {
+    return fs
+      .readdirSync(path.join(modulesDir, 'torch'))
+      .some((f) => /^_C\..*\.(pyd|so)$/.test(f) || f === '_C.pyd');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Store-install route that never launches Blender: an installer
+ * Python already on the machine (the MeshCoder env) downloads torch
+ * wheels built for Blender's Python into the modules folder. numpy
+ * is deliberately not installed — Blender bundles its own, and
+ * torch's remaining small dependencies come in the second step.
+ */
+async function installTorchForeign(blender, installerPython, { onLog = () => {}, registerChild } = {}) {
+  const base = foreignPipBase(blender.modulesDir, blender.version);
+  onLog(
+    `Fetching torch for Blender's Python ${blenderPythonFor(blender.version)} using ${installerPython} — the Store package itself is never launched…`
+  );
+  await runStreaming(installerPython, [...base, '--no-deps', 'torch', '--index-url', TORCH_INDEX], {
+    onLog,
+    registerChild,
+  });
+  await runStreaming(
+    installerPython,
+    [...base, 'filelock', 'typing-extensions', 'sympy', 'networkx', 'jinja2', 'fsspec', 'MarkupSafe'],
+    { onLog, registerChild }
+  );
+  if (!torchCompiledPresent(blender.modulesDir)) {
+    throw new Error("pip finished but the compiled torch build for Blender's Python is missing from the modules folder");
+  }
+}
+
 /**
  * Install CPU-only torch into the install's per-user modules folder,
  * streaming output to onLog. Standard installs use Blender's Python
- * directly (its pip bootstrapped via ensurepip when missing); Store
- * installs run the same pip through Blender itself (see above).
+ * directly (its pip bootstrapped via ensurepip when missing). Store
+ * installs prefer the foreign-target download via an installer
+ * Python (opts.installerPython) and only fall back to running pip
+ * through Blender itself when no installer Python is available.
  */
-async function installTorch(blender, { onLog = () => {}, registerChild } = {}) {
+async function installTorch(blender, { onLog = () => {}, registerChild, installerPython } = {}) {
   fs.mkdirSync(blender.modulesDir, { recursive: true });
+  if (blender.store && installerPython) {
+    await installTorchForeign(blender, installerPython, { onLog, registerChild });
+    return;
+  }
   if (blender.store) {
     if (!blender.exe) throw new Error('Store install has no launchable blender.exe');
     onLog(`Launching Blender: ${blender.exe}`);
@@ -494,6 +581,10 @@ module.exports = {
   parseStorePackagesOutput,
   aliasProbe,
   runBlenderCapture,
+  blenderPythonFor,
+  foreignPipBase,
+  torchCompiledPresent,
+  installTorchForeign,
   storeEntries,
   storeInstallScript,
   defaultRoots,

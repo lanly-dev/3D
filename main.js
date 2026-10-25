@@ -1563,8 +1563,19 @@ async function runBlenderPrep() {
     const target = installs[0];
     if (installs.length > 1) log(`Found ${installs.length} Blender installs; using the newest.`);
     log(`Blender ${target.version} — ${target.dir}`);
+    // An installer Python for the Store route: the MeshCoder env's
+    // interpreter, whose pip can download wheels aimed at Blender's
+    // (different) Python version without launching Blender at all.
+    const mcCfg = meshcoder.loadConfig();
+    const mcDetect = mcCfg.python && mcCfg.home ? mcCfg : meshcoder.detect();
+    const installerPython =
+      mcCfg.python && fs.existsSync(mcCfg.python) ? mcCfg.python : mcDetect.python || null;
     if (target.store) {
-      log('Microsoft Store install: the package folder is protected, so pip will run through Blender itself.');
+      log(
+        installerPython
+          ? "Microsoft Store install: the package folder is protected and its exe resists launching, so torch is fetched with the MeshCoder env's pip, aimed at Blender's Python."
+          : 'Microsoft Store install: the package folder is protected, so pip will run through Blender itself.'
+      );
     }
     log(`Modules folder: ${target.modulesDir}`);
     checkCancel();
@@ -1573,8 +1584,8 @@ async function runBlenderPrep() {
       log('torch is already in the modules folder — skipping the install.');
     } else {
       prepState({ phase: 'running', label: 'Installing CPU torch (~200 MB)…' });
-      log("Installing CPU-only torch with Blender's own Python — a few minutes, mostly downloading…");
-      await blenderprep.installTorch(target, { onLog: log, registerChild });
+      log('Installing CPU-only torch — a few minutes, mostly downloading…');
+      await blenderprep.installTorch(target, { onLog: log, registerChild, installerPython });
       checkCancel();
       if (!blenderprep.torchInModules(target)) {
         throw new Error('pip finished but torch is not in the modules folder');
@@ -1583,7 +1594,7 @@ async function runBlenderPrep() {
     }
 
     prepState({ phase: 'running', label: 'Verifying in Blender…' });
-    const home = meshcoder.loadConfig().home || meshcoder.detect().home;
+    const home = mcCfg.home || mcDetect.home;
     log(
       home
         ? 'Launching Blender headless to import bpy_lib…'
@@ -1591,8 +1602,20 @@ async function runBlenderPrep() {
     );
     const verdict = await blenderprep.verifyBlender(target, home, { registerChild, onLog: log });
     if (!verdict.ok) {
+      const detail = String(verdict.detail || '');
+      // For a Store install, failing to LAUNCH Blender from here is
+      // a known platform limit, not an install failure: if Blender
+      // never produced a real error (no traceback in its output),
+      // the prep counts as done — the in-Blender script run is the
+      // confirmation.
+      if (target.store && !/ModuleNotFoundError|ImportError|Traceback/.test(detail)) {
+        log('Blender could not be launched from here to verify (Store activation limits) — but torch is installed in the modules folder.');
+        log('Restart Blender, then run the generated script: the bpy_lib import should now work.');
+        prepState({ phase: 'done', label: 'Installed — verify in Blender' });
+        return { ok: true };
+      }
       log('Blender output (tail):');
-      for (const l of String(verdict.detail || '').split('\n')) if (l.trim()) log(l);
+      for (const l of detail.split('\n')) if (l.trim()) log(l);
       throw new Error(
         `Verification failed — Blender could not import ${verdict.mode === 'bpy_lib' ? 'bpy_lib' : 'torch'}`
       );

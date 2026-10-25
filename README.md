@@ -139,11 +139,14 @@ result written to the window's log), adds CPU-only torch (~200 MB)
 to Blender's per-user
 modules folder (the Blender install itself is untouched, no admin
 needed), and verifies by having Blender import `bpy_lib` headless.
-For Store installs the pip step runs through Blender itself, since
-the Store package folder is protected — and because Windows also
-blocks directly launching a Store app's exe, the launch falls back
-through the command shell and PowerShell's Start-Process as needed
-(each attempt is noted in the log).
+For Store installs, Windows protects the package folder and blocks
+outside processes from launching its exe, so the install never
+launches Blender at all: the MeshCoder env's pip downloads torch
+wheels built for Blender's own Python version (foreign-target
+install) into the modules folder. Verification still tries to
+launch Blender headless (with shell and PowerShell Start-Process
+fallbacks); if Store activation prevents even that, the prep
+reports "installed — verify in Blender" instead of failing.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
