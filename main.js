@@ -1913,6 +1913,9 @@ function buildMenu() {
         { label: 'Reload', accelerator: 'Ctrl+R', click: () => focusedWebContents()?.reload() },
         { type: 'separator' },
         { label: 'Toggle DevTools', accelerator: 'Ctrl+Shift+I', click: () => focusedWebContents()?.toggleDevTools() },
+        // A menu item takes only one accelerator, so this hidden twin gives
+        // Toggle DevTools its second shortcut (F12) with no second visible entry.
+        { label: 'Toggle DevTools', accelerator: 'F12', visible: false, acceleratorWorksWhenHidden: true, click: () => focusedWebContents()?.toggleDevTools() },
       ],
     },
     {
