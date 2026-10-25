@@ -1609,6 +1609,49 @@ async function runBlenderPrep() {
     }
     checkCancel();
 
+    // DLL verdict that does not depend on launching Blender: load
+    // torch's c10.dll in the MeshCoder env python, a neutral process.
+    // Store installs cannot be launched reliably for verification,
+    // so gating this diagnosis on verify output meant the verdict
+    // never printed there (observed on Lan's machine: prep finished
+    // without setting KMP_DUPLICATE_LIB_OK or naming the runtime).
+    // Fail here = a system runtime is missing, whatever Blender
+    // would say. Pass + Store target = set the duplicate-OpenMP
+    // allowance up front, since verify cannot observe the clash.
+    const dllProbePython = installerPython || target.python;
+    const dllPath = blenderprep.torchDllPath(target);
+    if (dllProbePython && fs.existsSync(dllPath)) {
+      prepState({ phase: 'running', label: 'Checking the torch DLL…' });
+      log('Checking whether torch\'s core DLL loads on this machine…');
+      const dllProbe = await blenderprep.probeDll(dllProbePython, dllPath, { registerChild });
+      checkCancel();
+      if (!dllProbe.ok) {
+        log('c10.dll fails to load even outside Blender — a system runtime it needs is missing, usually the Microsoft Visual C++ 2015–2022 Redistributable (x64).');
+        log('Install it from Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe), then re-run Prepare Blender.');
+        prepState({ phase: 'error', label: 'Missing Visual C++ runtime' });
+        return { ok: false, message: 'Missing Visual C++ runtime' };
+      }
+      log('c10.dll loads fine outside Blender — the DLL itself is healthy.');
+      if (target.store) {
+        let setOk = false;
+        try {
+          const set = await blenderprep.runCapture('setx', ['KMP_DUPLICATE_LIB_OK', 'TRUE'], {
+            timeoutMs: 30000,
+            registerChild,
+          });
+          setOk = set.code === 0;
+        } catch {
+          setOk = false;
+        }
+        log(
+          setOk
+            ? 'Set KMP_DUPLICATE_LIB_OK=TRUE (allows torch\'s runtime to coexist with Blender\'s). Fully quit Blender and restart it before running a script — the variable only reaches Blender processes started from now on.'
+            : 'Could not set KMP_DUPLICATE_LIB_OK automatically — run `setx KMP_DUPLICATE_LIB_OK TRUE` in PowerShell, then fully restart Blender.'
+        );
+        checkCancel();
+      }
+    }
+
     prepState({ phase: 'running', label: 'Verifying in Blender…' });
     const home = mcHome;
     log(
