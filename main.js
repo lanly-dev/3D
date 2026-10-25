@@ -41,6 +41,7 @@ const path = require('path');
 const fs = require('fs');
 const url = require('url');
 const meshcoder = require('./meshcoder');
+const blenderprep = require('./blenderprep');
 const assets = require('./assets');
 const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
@@ -1496,6 +1497,126 @@ async function compoundActiveWorkspace() {
   }
 }
 
+// --- Prepare Blender window -----------------------------------------
+// bpy_lib (inside the MeshCoder clone) imports torch, which Blender's
+// Python doesn't ship. This flow installs CPU-only torch into
+// Blender's per-user modules folder and verifies by having Blender
+// import bpy_lib headless. See blenderprep.js.
+let prepWin = null;
+let prepRunning = false;
+let prepCancelled = false;
+let prepChild = null;
+
+function openPrepWindow() {
+  if (prepWin && !prepWin.isDestroyed()) {
+    prepWin.focus();
+    return prepWin;
+  }
+  prepWin = new BrowserWindow({
+    width: 780,
+    height: 620,
+    title: 'Prepare Blender',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'prep-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  prepWin.on('closed', () => {
+    prepWin = null;
+  });
+  prepWin.loadFile(path.join(__dirname, 'prep.html'));
+  return prepWin;
+}
+
+function prepLog(line) {
+  if (prepWin && !prepWin.isDestroyed()) prepWin.webContents.send('prep:log', String(line));
+}
+
+function prepState(state) {
+  if (prepWin && !prepWin.isDestroyed()) prepWin.webContents.send('prep:state', state);
+}
+
+async function runBlenderPrep() {
+  if (prepRunning) return { ok: false, message: 'Preparation is already running' };
+  prepRunning = true;
+  prepCancelled = false;
+  const log = (line) => prepLog(line);
+  const registerChild = (child) => {
+    prepChild = child;
+  };
+  const checkCancel = () => {
+    if (prepCancelled) throw new Error('Preparation cancelled');
+  };
+  try {
+    prepState({ phase: 'running', label: 'Finding Blender…' });
+    const installs = blenderprep.findBlenders(app.getPath('appData'));
+    if (!installs.length) {
+      log('No Blender installation found in the standard locations:');
+      for (const r of blenderprep.defaultRoots()) log(`  ${r}`);
+      log('Install Blender 4.x from blender.org, then re-run. (Portable or Steam installs in custom folders are not detected yet.)');
+      prepState({ phase: 'error', label: 'Blender not found' });
+      return { ok: false, message: 'Blender not found' };
+    }
+    const target = installs[0];
+    if (installs.length > 1) log(`Found ${installs.length} Blender installs; using the newest.`);
+    log(`Blender ${target.version} — ${target.dir}`);
+    log(`Modules folder: ${target.modulesDir}`);
+    checkCancel();
+
+    if (blenderprep.torchInModules(target)) {
+      log('torch is already in the modules folder — skipping the install.');
+    } else {
+      prepState({ phase: 'running', label: 'Installing CPU torch (~200 MB)…' });
+      log("Installing CPU-only torch with Blender's own Python — a few minutes, mostly downloading…");
+      await blenderprep.installTorch(target, { onLog: log, registerChild });
+      checkCancel();
+      if (!blenderprep.torchInModules(target)) {
+        throw new Error('pip finished but torch is not in the modules folder');
+      }
+      log('torch installed.');
+    }
+
+    prepState({ phase: 'running', label: 'Verifying in Blender…' });
+    const home = meshcoder.loadConfig().home || meshcoder.detect().home;
+    log(
+      home
+        ? 'Launching Blender headless to import bpy_lib…'
+        : 'Launching Blender headless to import torch (no MeshCoder clone found for the full bpy_lib check)…'
+    );
+    const verdict = await blenderprep.verifyBlender(target, home, { registerChild });
+    if (!verdict.ok) {
+      log('Blender output (tail):');
+      for (const l of String(verdict.detail || '').split('\n')) if (l.trim()) log(l);
+      throw new Error(
+        `Verification failed — Blender could not import ${verdict.mode === 'bpy_lib' ? 'bpy_lib' : 'torch'}`
+      );
+    }
+    log(
+      verdict.mode === 'bpy_lib'
+        ? 'Verified: Blender imported bpy_lib successfully.'
+        : 'Verified: Blender imported torch successfully.'
+    );
+    log('Done. Restart Blender (if it is open), then run the generated script.');
+    prepState({ phase: 'done', label: 'Blender is ready' });
+    return { ok: true };
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    if (prepCancelled || /cancelled/i.test(msg)) {
+      prepState({ phase: 'cancelled', label: 'Cancelled' });
+      log('Cancelled.');
+      return { ok: false, message: 'Preparation cancelled' };
+    }
+    log(`Failed: ${msg}`);
+    prepState({ phase: 'error', label: 'Preparation failed' });
+    return { ok: false, message: msg };
+  } finally {
+    prepRunning = false;
+    prepChild = null;
+  }
+}
+
 function buildMenu() {
   const template = [
     {
@@ -1640,6 +1761,7 @@ function buildMenu() {
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
+        { label: 'Prepare Blender for MeshCoder scripts…', click: () => openPrepWindow() },
         { type: 'separator' },
         {
           label: 'Compound active workspace',
@@ -1769,6 +1891,12 @@ function registerIpc() {
         /* already settled */
       }
     }
+    return true;
+  });
+  ipcMain.handle('prep:start', () => runBlenderPrep());
+  ipcMain.handle('prep:cancel', () => {
+    prepCancelled = true;
+    if (prepChild && !prepChild.killed) prepChild.kill();
     return true;
   });
   ipcMain.handle('setup:openModelPage', () => {

@@ -130,6 +130,13 @@ without it, Blender can't resolve the script's
 hand-fixing a line, right-click the script's row and choose
 **Verify** to re-run the same check on demand.
 
+One more one-time step on the Blender side: `bpy_lib` imports
+`torch`, which Blender's Python doesn't ship. **Tools → Prepare
+Blender for MeshCoder scripts…** finds your Blender install,
+adds CPU-only torch (~200 MB) to Blender's per-user modules folder
+(the Blender install itself is untouched, no admin needed), and
+verifies by having Blender import `bpy_lib` headless.
+
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
 time (a limb, a torso) rather than a whole fused character.
