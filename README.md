@@ -148,7 +148,12 @@ status bar reports the part count and gate activity. The file also
 gets a small header stamped at the top that puts the MeshCoder
 clone's `blender_scripts` folder on `sys.path` — without it, Blender
 can't resolve the script's `from bpy_lib import *` and dies with
-`ModuleNotFoundError`. Shells under 1% of the total surface are
+`ModuleNotFoundError`. The same header also carries the torch
+fallback: it tries importing the real torch, and only if that
+import fails (the WinError 1114 case) does it put the app's numpy
+stand-in — kept in `Documents\Hunyuan3D\torch-shim` — at the front
+of `sys.path`, so the script runs even where Blender's torch won't
+load. Shells under 1% of the total surface are
 treated as fragments and skipped (noted in the file). After
 hand-fixing a line, right-click the script's row and choose
 **Verify and fix** to re-run the repair + validation on demand

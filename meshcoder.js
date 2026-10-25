@@ -507,9 +507,14 @@ async function convertToCode(meshPath, outDir, opts = {}) {
 
     // 5. Stamp the bpy_lib header (see stampBlenderHeader): without
     // it, running the script in Blender dies immediately with
-    // ModuleNotFoundError: No module named 'bpy_lib'. Best-effort —
-    // a stamping failure never fails the conversion.
+    // ModuleNotFoundError: No module named 'bpy_lib'. The header
+    // points at the numpy torch stand-in as its import fallback, so
+    // refresh that file too. Best-effort — a stamping failure never
+    // fails the conversion.
     try {
+      if (ensureTorchShim() && onLog) {
+        onLog('Refreshed the torch fallback for Blender');
+      }
       if (stampBlenderHeader(codePath, cfg.home) && onLog) {
         onLog('Stamped the bpy_lib path header');
       }
@@ -524,6 +529,31 @@ async function convertToCode(meshPath, outDir, opts = {}) {
 
 const HEADER_MARKER = '# --- Hunyuan3D header: bpy_lib path (auto-added) ---';
 
+/** The fixed folder the app keeps the numpy torch stand-in in. */
+function torchShimDir() {
+  return path.join(os.homedir(), 'Documents', 'Hunyuan3D', 'torch-shim');
+}
+
+/**
+ * Write the numpy torch stand-in (the same source Prepare Blender
+ * installs) to torchShimDir()/torch.py. The header stamped into
+ * every converted script points at this folder, so the fallback
+ * travels with the conversion instead of depending on a startup
+ * script having run in whichever Blender opens the file. Returns
+ * true when the file was (re)written.
+ */
+function ensureTorchShim() {
+  const dir = torchShimDir();
+  const file = path.join(dir, 'torch.py');
+  const src = require('./blenderprep').TORCH_SHIM_SRC;
+  let current = null;
+  try { current = fs.readFileSync(file, 'utf8'); } catch { /* not written yet */ }
+  if (current === src) return false;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, src);
+  return true;
+}
+
 /**
  * The header prepended to every generated script. MeshCoder's code
  * starts with `from bpy_lib import *`, and bpy_lib ships inside the
@@ -531,6 +561,16 @@ const HEADER_MARKER = '# --- Hunyuan3D header: bpy_lib path (auto-added) ---';
  * Blender's sys.path, so an unstamped script dies on its first import
  * inside Blender. The header tries the clone location baked in at
  * conversion time first, then the app's managed clone location.
+ *
+ * The header also carries the torch fallback: bpy_lib does
+ * `import torch`, and on machines where the torch install inside
+ * Blender cannot load (its DLLs fail to initialize — WinError 1114)
+ * that import kills the script before any geometry is built. The
+ * header tries the real torch first; only when the import blows up
+ * does it put the app's numpy stand-in at the front of sys.path, so
+ * bpy_lib picks it up instead. A healthy torch is never shadowed,
+ * and the fallback needs no Prepare Blender run and no Blender
+ * restart to be in place — it is part of the file.
  */
 function blenderHeader(home) {
   const scriptsDir = path.join(home || '', 'src', 'llama_recipes', 'blender_scripts');
@@ -542,6 +582,16 @@ function blenderHeader(home) {
     `for _h3d_p in (${JSON.stringify(scriptsDir)}, _h3d_os.path.join(_h3d_os.path.expanduser('~'), 'Documents', 'Hunyuan3D', 'MeshCoder', 'src', 'llama_recipes', 'blender_scripts')):`,
     '    if _h3d_os.path.isdir(_h3d_p) and _h3d_p not in _h3d_sys.path:',
     '        _h3d_sys.path.append(_h3d_p)',
+    '# bpy_lib imports torch. If the torch inside this Blender cannot',
+    '# load (WinError 1114: a DLL initialization routine failed), fall',
+    '# back to the numpy stand-in the app keeps for exactly the torch',
+    '# calls bpy_lib makes, so this script still runs.',
+    'try:',
+    '    import torch',
+    'except Exception:',
+    `    _h3d_shim = ${JSON.stringify(torchShimDir())}`,
+    '    if _h3d_os.path.isdir(_h3d_shim) and _h3d_shim not in _h3d_sys.path:',
+    '        _h3d_sys.path.insert(0, _h3d_shim)',
     '# --- end Hunyuan3D header ---',
     '',
     '',
@@ -1690,4 +1740,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, repairSource, repairFile, assembleAndGate, stampBlenderHeader, blenderHeader, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, repairSource, repairFile, assembleAndGate, stampBlenderHeader, blenderHeader, torchShimDir, ensureTorchShim, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
