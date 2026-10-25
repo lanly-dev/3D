@@ -193,7 +193,15 @@ directory, and pre-loads `libiomp5md.dll`, `c10.dll`,
 `torch_cpu.dll` and `torch.dll` in dependency order, so
 `bpy_lib`'s `import torch` reuses the already-initialized copies.
 Each preload result is written to `hunyuan3d_preload.log` next
-to the script.
+to the script. If a key DLL still fails to load, the startup
+script falls back to a small numpy-backed stand-in for torch
+(installed beside it as `hunyuan3d_torch_shim\torch.py`) that
+covers exactly the torch calls `bpy_lib` makes — `tensor()`,
+`eye()`, the `float32`/`long` dtypes, and tensor slicing, item
+assignment, `.norm(dim=0)`, `.clone()`, `.contiguous()` and
+matmul — so generated scripts run anyway; it raises a clear
+error on anything outside that surface, and a healthy real
+torch is never shadowed.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a

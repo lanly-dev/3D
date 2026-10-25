@@ -604,6 +604,125 @@ async function probeDll(python, dllPath, { registerChild } = {}) {
 }
 
 /**
+ * A numpy-backed stand-in for the slice of torch that MeshCoder's
+ * bpy_lib.py actually uses — the fallback for Blenders where the
+ * real torch's DLLs will not initialize (WinError 1114) no matter
+ * what. Coverage was enumerated against the upstream file (90003
+ * bytes, fetched 2026-10-25): `torch.tensor(...)` (incl. on a
+ * mathutils Matrix), `torch.eye(4)`, the `torch.float32` /
+ * `torch.long` dtype names, and on the resulting tensors
+ * `.contiguous()`, `.clone()`, `.norm(dim=0)`, slicing, item
+ * assignment, `@` matmul and `np.array(...)` back-conversion —
+ * that is the whole surface (get_faces' two tensor returns plus
+ * the two rotation_mode='MATRIX' blocks). Anything outside it
+ * raises a clear AttributeError instead of silently misbehaving.
+ * Written next to the startup script by installStartupScript; the
+ * startup script puts its folder first on sys.path ONLY when the
+ * real torch's c10/torch_cpu preload failed at launch, so a healthy
+ * torch is never shadowed.
+ */
+const TORCH_SHIM_SRC = `# Hunyuan3D Desktop: numpy-backed stand-in for the slice of torch
+# that MeshCoder's bpy_lib.py uses, for Blenders where the real
+# torch's DLLs will not initialize (WinError 1114). Prepare Blender
+# installed this file; its startup script puts this folder on
+# sys.path ONLY when pre-loading the real torch's DLLs failed at
+# launch - when real torch loads, this file is never imported.
+# Coverage is exactly bpy_lib's torch surface: tensor(), eye(),
+# the float32 / long dtype names, and Tensor .contiguous() /
+# .clone() / .norm(dim=...) / slicing / item assignment / matmul /
+# np.array() conversion. Anything else raises a clear error.
+import numpy as _np
+
+float32 = _np.float32
+float64 = _np.float64
+float16 = _np.float16
+long = _np.int64
+int32 = _np.int32
+int64 = _np.int64
+bool = _np.bool_
+
+__version__ = '0.0.0+hunyuan3d-numpy-shim'
+
+
+class Tensor:
+    """A thin wrapper over a numpy array, with torch's call shapes."""
+
+    def __init__(self, array):
+        self._a = _np.asarray(array)
+
+    @property
+    def shape(self):
+        return self._a.shape
+
+    @property
+    def dtype(self):
+        return self._a.dtype
+
+    def contiguous(self):
+        return Tensor(_np.ascontiguousarray(self._a))
+
+    def clone(self):
+        return Tensor(self._a.copy())
+
+    def norm(self, dim=None):
+        if dim is None:
+            return Tensor(_np.linalg.norm(self._a))
+        return Tensor(_np.linalg.norm(self._a, axis=dim))
+
+    def numpy(self):
+        return self._a
+
+    def tolist(self):
+        return self._a.tolist()
+
+    def __array__(self, dtype=None):
+        return _np.asarray(self._a, dtype=dtype)
+
+    def __getitem__(self, key):
+        result = self._a[key]
+        if isinstance(result, _np.ndarray):
+            return Tensor(result)
+        return result
+
+    def __setitem__(self, key, value):
+        if isinstance(value, Tensor):
+            value = value._a
+        self._a[key] = value
+
+    def __matmul__(self, other):
+        if isinstance(other, Tensor):
+            other = other._a
+        return Tensor(self._a @ other)
+
+    def __rmatmul__(self, other):
+        return Tensor(_np.asarray(other) @ self._a)
+
+    def __repr__(self):
+        return 'tensor(%r)' % (self._a,)
+
+
+def tensor(data, dtype=None):
+    if isinstance(data, Tensor):
+        array = data._a
+    else:
+        array = _np.asarray(data)
+    if dtype is not None:
+        array = array.astype(dtype)
+    return Tensor(array)
+
+
+def eye(n, dtype=None):
+    return Tensor(_np.eye(n, dtype=dtype if dtype is not None else _np.float64))
+
+
+def __getattr__(name):
+    raise AttributeError(
+        'the Hunyuan3D numpy torch shim does not provide torch.%s - '
+        'this code path needs the real torch (fix the WinError 1114 '
+        'DLL failure to use it)' % name)
+`;
+
+/**
  * Source of the Blender startup script Prepare Blender installs.
  * Blender executes every .py in <user scripts>/startup at launch,
  * so this script does two jobs at every Blender launch, before any
@@ -626,9 +745,14 @@ async function probeDll(python, dllPath, { registerChild } = {}) {
  *     reuses these already-initialized copies. Every preload result
  *     is printed and also written to hunyuan3d_preload.log next to
  *     the script, so a still-failing import has a paper trail.
- *     Nothing here may break a Blender launch: every step is
- *     guarded, and a failed preload just means the import fails
- *     later exactly as it would have without this script.
+ *     If a key DLL (c10 / torch_cpu / torch) still fails to load,
+ *     the script falls back to the numpy torch shim (TORCH_SHIM_SRC,
+ *     installed alongside): its folder goes first on sys.path, so
+ *     bpy_lib's `import torch` resolves to the shim and generated
+ *     scripts run anyway. Nothing here may break a Blender launch:
+ *     every step is guarded, and a failed preload without the shim
+ *     would just mean the import fails later exactly as it would
+ *     have without this script.
  */
 function startupScriptSource(meshcoderHome, modulesDir) {
   const baked = meshcoderHome
@@ -639,6 +763,9 @@ function startupScriptSource(meshcoderHome, modulesDir) {
     "_h3d_os.path.join(_h3d_os.path.expanduser('~'), 'Documents', 'Hunyuan3D', 'MeshCoder', 'src', 'llama_recipes', 'blender_scripts')",
   ];
   const torchLib = modulesDir ? path.join(modulesDir, 'torch', 'lib') : null;
+  const shimDir = modulesDir
+    ? path.join(path.dirname(modulesDir), 'hunyuan3d_torch_shim')
+    : null;
   return [
     '# Hunyuan3D Desktop: make MeshCoder\'s bpy_lib importable in Blender',
     '# and get torch\'s DLLs loaded before anything imports torch.',
@@ -654,7 +781,11 @@ function startupScriptSource(meshcoderHome, modulesDir) {
     '# anything imports torch: allow the duplicate OpenMP runtime,',
     '# register torch\'s lib folder for DLL searches, and pre-load the',
     '# DLLs in dependency order. Outcomes land in hunyuan3d_preload.log',
-    '# next to this script (and in Blender\'s system console).',
+    '# next to this script (and in Blender\'s system console). If the',
+    '# real DLLs still will not load, fall back to the numpy torch',
+    '# shim Prepare Blender installed next to this script: it covers',
+    '# exactly the torch calls bpy_lib makes, so generated scripts',
+    '# run anyway. A healthy real torch is never shadowed.',
     '_h3d_notes = []',
     "if _h3d_sys.platform.startswith('win'):",
     "    _h3d_os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')",
@@ -665,6 +796,7 @@ function startupScriptSource(meshcoderHome, modulesDir) {
     '        except Exception:',
     '            pass',
     '        import ctypes as _h3d_ctypes',
+    '        _h3d_failed = []',
     "        for _h3d_dll in ('libiomp5md.dll', 'c10.dll', 'torch_cpu.dll', 'torch.dll'):",
     '            _h3d_dll_path = _h3d_os.path.join(_h3d_torch_lib, _h3d_dll)',
     '            if not _h3d_os.path.isfile(_h3d_dll_path):',
@@ -674,6 +806,12 @@ function startupScriptSource(meshcoderHome, modulesDir) {
     "                _h3d_notes.append('torch preload OK: ' + _h3d_dll)",
     '            except Exception as _h3d_err:',
     "                _h3d_notes.append('torch preload FAILED: ' + _h3d_dll + ': ' + str(_h3d_err))",
+    '                _h3d_failed.append(_h3d_dll)',
+    "        if any(_h3d_f in _h3d_failed for _h3d_f in ('c10.dll', 'torch_cpu.dll', 'torch.dll')):",
+    `            _h3d_shim_dir = ${shimDir ? JSON.stringify(shimDir) : 'None'}`,
+    '            if _h3d_shim_dir and _h3d_os.path.isdir(_h3d_shim_dir):',
+    '                _h3d_sys.path.insert(0, _h3d_shim_dir)',
+    "                _h3d_notes.append('real torch DLLs failed - numpy torch shim active for bpy_lib')",
     'for _h3d_note in _h3d_notes:',
     "    print('Hunyuan3D: ' + _h3d_note)",
     'try:',
@@ -696,11 +834,19 @@ function startupScriptPath(blender) {
   return path.join(path.dirname(blender.modulesDir), 'startup', 'hunyuan3d_meshcoder_path.py');
 }
 
-/** Write (or refresh) the startup script. Returns its path. */
+/** Where the numpy torch shim lives for an install (sibling of modules/). */
+function torchShimPath(blender) {
+  return path.join(path.dirname(blender.modulesDir), 'hunyuan3d_torch_shim', 'torch.py');
+}
+
+/** Write (or refresh) the startup script and the torch shim. Returns the script path. */
 function installStartupScript(blender, meshcoderHome) {
   const file = startupScriptPath(blender);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, startupScriptSource(meshcoderHome, blender.modulesDir));
+  const shim = torchShimPath(blender);
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.writeFileSync(shim, TORCH_SHIM_SRC);
   return file;
 }
 
@@ -718,6 +864,8 @@ module.exports = {
   installTorchForeign,
   torchDllPath,
   probeDll,
+  TORCH_SHIM_SRC,
+  torchShimPath,
   startupScriptSource,
   startupScriptPath,
   installStartupScript,
