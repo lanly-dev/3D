@@ -24,9 +24,12 @@ A small desktop wrapper around the Hunyuan3D web app
   filters, per-asset actions, and a workspace scope. Double-click a name
   to rename the file in place (a model's companion script is renamed
   along with it); clicking the status line copies its message; right-click
-  a row for **Show in Explorer**, **Verify** (generated Python scripts
-  only: re-runs the syntax check and reports the verdict on the status
-  line), **Delete file** (moves it to the Recycle Bin, with
+  a row for **Show in Explorer**, **Verify and fix** (generated Python
+  scripts only: re-runs the syntax check and, when the file doesn't
+  parse, repairs the formatting — bracket balance, statements merged
+  onto one line, a truncated tail — keeping a `<file>.orig` backup;
+  a repair is written only when the result parses), **Delete file**
+  (moves it to the Recycle Bin, with
   confirmation), or **Remove from list**. **F12** toggles DevTools on
   the focused view.
 - **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
@@ -128,7 +131,9 @@ puts the MeshCoder clone's `blender_scripts` folder on `sys.path` —
 without it, Blender can't resolve the script's
 `from bpy_lib import *` and dies with `ModuleNotFoundError`. After
 hand-fixing a line, right-click the script's row and choose
-**Verify** to re-run the same check on demand.
+**Verify and fix** to re-run the same check on demand — it also
+repairs the common formatting failures itself (backing the
+original up as `<file>.orig`) whenever the repaired file parses.
 
 One more one-time step on the Blender side: `bpy_lib` imports
 `torch`, which Blender's Python doesn't ship. **Tools → Prepare

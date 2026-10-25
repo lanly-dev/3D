@@ -1178,25 +1178,44 @@ async function openMeshcoderConfig() {
 }
 
 /**
- * Syntax-check one generated script on demand (the asset row's Verify
- * menu item) and describe the verdict for the status line: parses
- * cleanly, or the first bad line — the same check that runs after a
- * conversion, re-runnable after a hand fix. Uses the MeshCoder env's
- * python (configured, or auto-detected).
+ * Syntax-check one generated script on demand (the asset row's
+ * Verify and fix menu item) and, when it does not parse, try to
+ * repair the formatting (meshcoder.repairSource: bracket balance,
+ * statements merged onto one line, a truncated tail — a candidate
+ * is written only when it parses). A repair backs the original up
+ * as <file>.orig first (the earliest original is kept). The verdict
+ * lands on the status line: clean, fixed (with what changed), or
+ * the error and the line, when no repair parses. Uses the MeshCoder
+ * env's python (configured, or auto-detected). Conversions still
+ * never modify their output — fixing happens only here, on demand.
  */
 async function verifyAssetFile(id) {
   const found = assets.find(String(id || ''));
   if (!found) return 'Asset not found';
   const name = path.basename(found.filePath);
-  if (!fs.existsSync(found.filePath)) return `Verify: ${name} — file not found on disk`;
+  if (!fs.existsSync(found.filePath)) return `Verify and fix: ${name} — file not found on disk`;
   let python = meshcoder.loadConfig().python;
   if (!python || !fs.existsSync(python)) python = meshcoder.detect().python;
   if (!python || !fs.existsSync(python)) {
-    return 'Verify needs the MeshCoder Python env — run Tools → Set up MeshCoder automatically… (or Detect) first.';
+    return 'Verify and fix needs the MeshCoder Python env — run Tools → Set up MeshCoder automatically… (or Detect) first.';
   }
   const issue = await meshcoder.checkSyntax(python, found.filePath);
-  if (!issue) return `Verify: ${name} — parses cleanly. Blender can run it.`;
-  return `Verify: ${name} — ⚠ syntax error at line ${issue.line}: ${issue.message}${issue.text ? `\n${issue.text}` : ''}`;
+  if (!issue) return `Verify and fix: ${name} — parses cleanly. Blender can run it.`;
+  const repair = await meshcoder.repairFile(python, found.filePath);
+  if (repair && repair.status === 'fixed' && typeof repair.fixed === 'string') {
+    try {
+      const origPath = `${found.filePath}.orig`;
+      if (!fs.existsSync(origPath)) fs.copyFileSync(found.filePath, origPath);
+      fs.writeFileSync(found.filePath, repair.fixed);
+    } catch (err) {
+      return `Verify and fix: ${name} — a fix was found but could not be written (${err && err.message ? err.message : err})`;
+    }
+    const stillBad = await meshcoder.checkSyntax(python, found.filePath);
+    if (!stillBad) {
+      return `Verify and fix: ${name} — fixed (${repair.changes.join('; ')}). Now parses cleanly. Original saved as ${name}.orig`;
+    }
+  }
+  return `Verify and fix: ${name} — ⚠ syntax error at line ${issue.line}: ${issue.message} — couldn't fix it automatically${issue.text ? `\n${issue.text}` : ''}`;
 }
 
 /**
@@ -1976,12 +1995,13 @@ function registerIpc() {
     const items = [
       { label: 'Show in Explorer', click: () => shell.showItemInFolder(found.filePath) },
     ];
-    // Generated Python gets an on-demand syntax check (Verify) — the
-    // same parse that runs after a conversion, re-runnable after a
-    // hand fix. The verdict lands on the sidebar status line.
+    // Generated Python gets an on-demand syntax check + repair
+    // (Verify and fix) — the same parse that runs after a
+    // conversion, plus a parse-gated formatting repair when it
+    // fails. The verdict lands on the sidebar status line.
     if (/\.py$/i.test(found.filePath || '')) {
       items.push({
-        label: 'Verify',
+        label: 'Verify and fix',
         click: () => {
           verifyAssetFile(found.id).then((msg) => pushSidebarStatus(msg)).catch(() => {});
         },

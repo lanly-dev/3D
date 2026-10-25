@@ -536,6 +536,208 @@ async function checkSyntax(python, codePath) {
   return parseSource(python, source);
 }
 
+/**
+ * Repair program for generated scripts (Verify and fix). Reads the
+ * source on stdin and tries, in order, the formatting failures this
+ * generator actually produces — extra or missing closing brackets,
+ * two statements merged onto one line, a truncated trailing
+ * statement — accepting a candidate ONLY when ast.parse accepts it,
+ * so a "fix" can never make a file worse than unparseable-in-a-new-
+ * way. Prints STATUS clean / STATUS unfixable, or STATUS fixed with
+ * CHANGE notes and the repaired source as a byte-counted payload.
+ * Nothing is executed; ast and tokenize only.
+ */
+const REPAIR_SRC = [
+  'import ast, io, sys, tokenize',
+  'src = sys.stdin.read()',
+  'def parses(s):',
+  '    try:',
+  '        ast.parse(s)',
+  '        return True',
+  '    except SyntaxError:',
+  '        return False',
+  'def emit_fixed(fixed, notes):',
+  '    data = fixed.encode("utf-8")',
+  '    head = ["STATUS fixed", "CHANGES " + str(len(notes))]',
+  '    for n in notes:',
+  '        head.append("CHANGE " + n)',
+  '    head.append("BYTES " + str(len(data)))',
+  '    sys.stdout.write("\\n".join(head) + "\\n")',
+  '    sys.stdout.flush()',
+  '    sys.stdout.buffer.write(data)',
+  '    sys.exit(0)',
+  'if parses(src):',
+  '    print("STATUS clean")',
+  '    sys.exit(0)',
+  'err_line = 0',
+  'try:',
+  '    ast.parse(src)',
+  'except SyntaxError as e:',
+  '    err_line = e.lineno or 0',
+  'OPEN = {"(": ")", "[": "]", "{": "}"}',
+  'CLOSE = {v: k for k, v in OPEN.items()}',
+  'def collect_tokens(s):',
+  '    toks = []',
+  '    try:',
+  '        for tok in tokenize.generate_tokens(io.StringIO(s).readline):',
+  '            toks.append(tok)',
+  '    except Exception:',
+  '        pass',
+  '    return toks',
+  'def bracket_scan(s):',
+  '    stack = []',
+  '    negatives = []',
+  '    toks = collect_tokens(s)',
+  '    if not toks:',
+  '        return None',
+  '    for tok in toks:',
+  '        if tok.type != tokenize.OP:',
+  '            continue',
+  '        t = tok.string',
+  '        if t in OPEN:',
+  '            stack.append(t)',
+  '        elif t in CLOSE:',
+  '            if stack and stack[-1] == CLOSE[t]:',
+  '                stack.pop()',
+  '            elif CLOSE[t] in stack:',
+  '                while stack and stack[-1] != CLOSE[t]:',
+  '                    stack.pop()',
+  '                stack.pop()',
+  '            else:',
+  '                negatives.append((tok.start[0] - 1, tok.start[1], t))',
+  '    return stack, negatives',
+  'def apply_rebalance(s):',
+  '    scan = bracket_scan(s)',
+  '    if scan is None:',
+  '        return None, []',
+  '    stack, negatives = scan',
+  '    notes = []',
+  '    lines = s.split("\\n")',
+  '    if negatives:',
+  '        by_line = {}',
+  '        for ln, col, ch in negatives:',
+  '            by_line.setdefault(ln, []).append((col, ch))',
+  '        for ln, items in by_line.items():',
+  '            row = lines[ln]',
+  '            for col, ch in sorted(items, reverse=True):',
+  '                if col < len(row) and row[col] == ch:',
+  '                    row = row[:col] + row[col + 1:]',
+  '            lines[ln] = row',
+  '        notes.append("removed " + str(len(negatives)) + " extra closing bracket(s) on line(s) " + ", ".join(str(ln + 1) for ln in sorted(by_line)))',
+  '    out = "\\n".join(lines)',
+  '    if stack:',
+  '        out = out + "".join(OPEN[c] for c in reversed(stack))',
+  '        notes.append("closed " + str(len(stack)) + " unclosed bracket(s) at the end of the file")',
+  '    if not notes:',
+  '        return None, []',
+  '    return out, notes',
+  'def split_points(s):',
+  '    toks = collect_tokens(s)',
+  '    depth = 0',
+  '    found = []',
+  '    for i, tok in enumerate(toks):',
+  '        if tok.type != tokenize.OP:',
+  '            continue',
+  '        if tok.string in OPEN:',
+  '            depth += 1',
+  '        elif tok.string in CLOSE:',
+  '            depth -= 1',
+  '            if depth == 0:',
+  '                j = i + 1',
+  '                while j < len(toks) and toks[j].type in (tokenize.NL, tokenize.COMMENT):',
+  '                    j += 1',
+  '                if j < len(toks):',
+  '                    nt = toks[j]',
+  '                    if nt.type == tokenize.NAME and nt.start[0] == tok.end[0]:',
+  '                        found.append((nt.start[0] - 1, nt.start[1]))',
+  '    return found',
+  'def apply_split(s, ln, col):',
+  '    lines = s.split("\\n")',
+  '    lines[ln] = lines[ln][:col].rstrip() + "\\n" + lines[ln][col:]',
+  '    return "\\n".join(lines)',
+  'cands = []',
+  'rb, rb_notes = apply_rebalance(src)',
+  'if rb:',
+  '    cands.append((rb, rb_notes))',
+  'for (ln, col) in split_points(src)[:3]:',
+  '    note = "split the statements merged on line " + str(ln + 1)',
+  '    cands.append((apply_split(src, ln, col), [note]))',
+  '    if rb:',
+  '        cands.append((apply_split(rb, ln, col), rb_notes + [note]))',
+  'lines = src.split("\\n")',
+  'if not err_line or err_line >= len(lines) - 25:',
+  '    for k in range(len(lines) - 1, max(len(lines) - 26, 0), -1):',
+  '        cand = "\\n".join(lines[:k])',
+  '        if cand.strip() and parses(cand):',
+  '            cands.append((cand if cand.endswith("\\n") else cand + "\\n", ["removed " + str(len(lines) - k) + " incomplete trailing line(s) starting at line " + str(k + 1)]))',
+  '            break',
+  'seen = set()',
+  'for cand, notes in cands:',
+  '    if cand != src and cand not in seen:',
+  '        seen.add(cand)',
+  '        if parses(cand):',
+  '            emit_fixed(cand, notes)',
+  'print("STATUS unfixable")',
+].join('\n');
+
+/**
+ * Try to repair Python source with the given interpreter. Resolves
+ * null when the repair tool itself fails (never throws), otherwise
+ * { status: 'clean' | 'unfixable' } or
+ * { status: 'fixed', fixed, changes } — 'fixed' is guaranteed to
+ * parse under that same interpreter (ast-verified inside REPAIR_SRC).
+ */
+function repairSource(python, source) {
+  return new Promise((resolve) => {
+    let child;
+    const chunks = [];
+    try {
+      child = spawn(python, ['-c', REPAIR_SRC], { windowsHide: true });
+    } catch {
+      return resolve(null);
+    }
+    child.stdout.on('data', (d) => chunks.push(d));
+    child.on('error', () => resolve(null));
+    child.on('close', () => {
+      const buf = Buffer.concat(chunks);
+      const head = buf.toString('utf8', 0, Math.min(buf.length, 4096));
+      const statusMatch = head.match(/^STATUS (\w+)$/m);
+      if (!statusMatch) return resolve(null);
+      const status = statusMatch[1];
+      if (status !== 'fixed') return resolve({ status });
+      const bytesMatch = head.match(/^BYTES (\d+)$/m);
+      if (!bytesMatch) return resolve(null);
+      const n = Number(bytesMatch[1]);
+      const bytesIdx = buf.indexOf('BYTES ');
+      const nl = buf.indexOf(0x0a, bytesIdx);
+      if (nl < 0 || buf.length < nl + 1 + n) return resolve(null);
+      const fixed = buf.subarray(nl + 1, nl + 1 + n).toString('utf8');
+      const changes = [];
+      const changeRe = /^CHANGE (.*)$/gm;
+      let m;
+      while ((m = changeRe.exec(head)) !== null) changes.push(m[1].trim());
+      resolve({ status, fixed, changes });
+    });
+    try {
+      child.stdin.write(source);
+      child.stdin.end();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/** repairSource for a file on disk. */
+async function repairFile(python, codePath) {
+  let source;
+  try {
+    source = fs.readFileSync(codePath, 'utf8');
+  } catch {
+    return null;
+  }
+  return repairSource(python, source);
+}
+
 /* ------------------------------------------------------------------ */
 /* Automatic setup (native Windows — no WSL2, no conda).              */
 /*                                                                    */
@@ -911,4 +1113,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, stampBlenderHeader, blenderHeader, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, repairSource, repairFile, stampBlenderHeader, blenderHeader, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
