@@ -1647,6 +1647,7 @@ async function runBlenderPrep() {
       const scriptFile = blenderprep.installStartupScript(target, mcHome);
       log(`Startup script written: ${scriptFile}`);
       log('From now on Blender finds bpy_lib by itself at launch.');
+      log('The script also pre-loads torch\'s DLLs at launch (the WinError 1114 fix — OpenMP allowance set in-process, no restart dance) and writes what happened to hunyuan3d_preload.log next to it.');
     } catch (err) {
       log(
         `Could not write the Blender startup script (${err && err.message ? err.message : err}) — converted scripts still carry the stamped header, so they run anyway.`

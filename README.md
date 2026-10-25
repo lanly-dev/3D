@@ -184,7 +184,16 @@ also writes a small startup script into Blender's per-user
 `scripts\startup` folder that puts the MeshCoder clone's
 `blender_scripts` folder on `sys.path` at every Blender launch —
 so generated scripts run with no console line and no reliance on
-the header stamped into newer conversions.
+the header stamped into newer conversions. The same startup
+script also preps torch's DLLs at launch (the in-process half of
+the WinError 1114 fix, independent of any environment variable):
+it sets `KMP_DUPLICATE_LIB_OK` inside Blender's own process,
+registers the modules folder's `torch\lib` as a DLL search
+directory, and pre-loads `libiomp5md.dll`, `c10.dll`,
+`torch_cpu.dll` and `torch.dll` in dependency order, so
+`bpy_lib`'s `import torch` reuses the already-initialized copies.
+Each preload result is written to `hunyuan3d_preload.log` next
+to the script.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a

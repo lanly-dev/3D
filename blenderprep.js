@@ -606,13 +606,31 @@ async function probeDll(python, dllPath, { registerChild } = {}) {
 /**
  * Source of the Blender startup script Prepare Blender installs.
  * Blender executes every .py in <user scripts>/startup at launch,
- * so this puts MeshCoder's blender_scripts folder on sys.path
- * permanently — generated scripts then run with no console line and
- * no reliance on the stamped header, old files included. Tries the
- * clone location known at prep time first, then the app's managed
- * clone location.
+ * so this script does two jobs at every Blender launch, before any
+ * generated script runs:
+ *
+ *  1. Puts MeshCoder's blender_scripts folder on sys.path — no
+ *     console line and no reliance on the stamped header, old files
+ *     included. Tries the clone location known at prep time first,
+ *     then the app's managed clone location.
+ *  2. On Windows, preps torch's DLLs for bpy_lib's `import torch`.
+ *     Inside Blender that import can die with WinError 1114 (c10.dll
+ *     will not initialize) when torch's OpenMP runtime clashes with
+ *     a DLL Blender already loaded, or when the loader cannot find
+ *     torch's own DLLs. Doing it here — in-process, at launch —
+ *     beats the setx approach, which only reaches processes started
+ *     after it ran and silently does nothing if a blender.exe was
+ *     left running: allow the duplicate OpenMP runtime, register
+ *     torch's lib folder as a DLL search directory, then pre-load
+ *     the DLLs in dependency order so torch's own loader later
+ *     reuses these already-initialized copies. Every preload result
+ *     is printed and also written to hunyuan3d_preload.log next to
+ *     the script, so a still-failing import has a paper trail.
+ *     Nothing here may break a Blender launch: every step is
+ *     guarded, and a failed preload just means the import fails
+ *     later exactly as it would have without this script.
  */
-function startupScriptSource(meshcoderHome) {
+function startupScriptSource(meshcoderHome, modulesDir) {
   const baked = meshcoderHome
     ? path.join(meshcoderHome, 'src', 'llama_recipes', 'blender_scripts')
     : null;
@@ -620,13 +638,52 @@ function startupScriptSource(meshcoderHome) {
     ...(baked ? [JSON.stringify(baked)] : []),
     "_h3d_os.path.join(_h3d_os.path.expanduser('~'), 'Documents', 'Hunyuan3D', 'MeshCoder', 'src', 'llama_recipes', 'blender_scripts')",
   ];
+  const torchLib = modulesDir ? path.join(modulesDir, 'torch', 'lib') : null;
   return [
-    '# Hunyuan3D Desktop: make MeshCoder\'s bpy_lib importable in Blender.',
+    '# Hunyuan3D Desktop: make MeshCoder\'s bpy_lib importable in Blender',
+    '# and get torch\'s DLLs loaded before anything imports torch.',
     '# Written by Tools > Prepare Blender (Hunyuan3D app). Blender runs',
-    '# this at every startup; deleting this file undoes it. It only adds',
-    "# the MeshCoder clone's blender_scripts folder to sys.path, so",
-    '# generated scripts (from bpy_lib import *) run as-is.',
+    '# this at every startup; deleting this file undoes it.',
     'import os as _h3d_os, sys as _h3d_sys',
+    '',
+    '# --- torch DLL prep (Windows only) ---',
+    '# bpy_lib does `import torch`, and inside Blender that can die with',
+    '# WinError 1114 (c10.dll fails to initialize): torch\'s OpenMP',
+    '# runtime clashes with a DLL Blender already loaded, or the loader',
+    '# cannot find torch\'s own DLLs. Fix it here, in-process, before',
+    '# anything imports torch: allow the duplicate OpenMP runtime,',
+    '# register torch\'s lib folder for DLL searches, and pre-load the',
+    '# DLLs in dependency order. Outcomes land in hunyuan3d_preload.log',
+    '# next to this script (and in Blender\'s system console).',
+    '_h3d_notes = []',
+    "if _h3d_sys.platform.startswith('win'):",
+    "    _h3d_os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')",
+    `    _h3d_torch_lib = ${torchLib ? JSON.stringify(torchLib) : 'None'}`,
+    '    if _h3d_torch_lib and _h3d_os.path.isdir(_h3d_torch_lib):',
+    '        try:',
+    '            _h3d_sys._hunyuan3d_dll_dir = _h3d_os.add_dll_directory(_h3d_torch_lib)',
+    '        except Exception:',
+    '            pass',
+    '        import ctypes as _h3d_ctypes',
+    "        for _h3d_dll in ('libiomp5md.dll', 'c10.dll', 'torch_cpu.dll', 'torch.dll'):",
+    '            _h3d_dll_path = _h3d_os.path.join(_h3d_torch_lib, _h3d_dll)',
+    '            if not _h3d_os.path.isfile(_h3d_dll_path):',
+    '                continue',
+    '            try:',
+    '                _h3d_ctypes.WinDLL(_h3d_dll_path)',
+    "                _h3d_notes.append('torch preload OK: ' + _h3d_dll)",
+    '            except Exception as _h3d_err:',
+    "                _h3d_notes.append('torch preload FAILED: ' + _h3d_dll + ': ' + str(_h3d_err))",
+    'for _h3d_note in _h3d_notes:',
+    "    print('Hunyuan3D: ' + _h3d_note)",
+    'try:',
+    "    _h3d_here = _h3d_os.path.dirname(_h3d_os.path.abspath(__file__))",
+    "    with open(_h3d_os.path.join(_h3d_here, 'hunyuan3d_preload.log'), 'w') as _h3d_f:",
+    "        _h3d_f.write('\\n'.join(_h3d_notes) + '\\n')",
+    'except Exception:',
+    '    pass',
+    '',
+    '# --- bpy_lib on sys.path ---',
     `for _h3d_p in (${candidates.join(', ')},):`,
     '    if _h3d_os.path.isdir(_h3d_p) and _h3d_p not in _h3d_sys.path:',
     '        _h3d_sys.path.append(_h3d_p)',
@@ -643,7 +700,7 @@ function startupScriptPath(blender) {
 function installStartupScript(blender, meshcoderHome) {
   const file = startupScriptPath(blender);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, startupScriptSource(meshcoderHome));
+  fs.writeFileSync(file, startupScriptSource(meshcoderHome, blender.modulesDir));
   return file;
 }
 
