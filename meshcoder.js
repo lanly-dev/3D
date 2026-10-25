@@ -903,13 +903,13 @@ const REPAIR_SRC = [
 ].join('\n');
 
 /**
- * Try to repair Python source with the given interpreter. Resolves
- * null when the repair tool itself fails (never throws), otherwise
- * { status: 'clean' | 'unfixable' } or
- * { status: 'fixed', fixed, changes } — 'fixed' is guaranteed to
- * parse under that same interpreter (ast-verified inside REPAIR_SRC).
+ * One repair pass (REPAIR_SRC). The passes inside are alternatives:
+ * a file with both a broken tail AND fused create_curve calls gets
+ * its tail dropped by one strategy, and the fused calls — which the
+ * fused pass only reaches on a parseable file — survive. repairSource
+ * below therefore chains passes.
  */
-function repairSource(python, source) {
+function repairSourceOnce(python, source) {
   return new Promise((resolve) => {
     let child;
     const chunks = [];
@@ -947,6 +947,35 @@ function repairSource(python, source) {
       resolve(null);
     }
   });
+}
+
+/**
+ * Repair Python source, chaining passes until one reports the file
+ * clean or unfixable (max 3 passes): each pass's strategies are
+ * alternatives, so a file needing two different repairs — a dropped
+ * tail AND a fused-curve split — only gets both if the repaired
+ * output goes through again. Resolves null when the repair tool
+ * itself fails (never throws); otherwise
+ * { status: 'clean' | 'unfixable' } or
+ * { status: 'fixed', fixed, changes } with every pass's changes
+ * accumulated. A later pass reporting 'unfixable' never discards an
+ * earlier pass's successful repair.
+ */
+async function repairSource(python, source) {
+  let current = source;
+  const allChanges = [];
+  for (let pass = 0; pass < 3; pass++) {
+    const r = await repairSourceOnce(python, current);
+    if (!r) return allChanges.length ? { status: 'fixed', fixed: current, changes: allChanges } : null;
+    if (r.status === 'fixed') {
+      allChanges.push(...(r.changes || []));
+      current = r.fixed;
+      continue;
+    }
+    if (allChanges.length) return { status: 'fixed', fixed: current, changes: allChanges };
+    return r;
+  }
+  return { status: 'fixed', fixed: current, changes: allChanges };
 }
 
 /** repairSource for a file on disk. */
