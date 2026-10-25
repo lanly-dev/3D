@@ -156,10 +156,13 @@ hand-fixing a line, right-click the script's row and choose
 
 One more one-time step on the Blender side: `bpy_lib` imports
 `torch`, which Blender's Python doesn't ship. **Tools → Prepare
-Blender for MeshCoder scripts…** finds your Blender install
+Blender for MeshCoder scripts…** finds your Blender installs
 (including Microsoft Store installs — looked up as app packages,
 with the `blender.exe` app alias as a fallback, and each probe's
-result written to the window's log), adds CPU-only torch (~200 MB)
+result written to the window's log) and sets up **every one it
+finds** — Blender keeps per-version user folders, so each version
+gets its own setup, and one version failing doesn't stop the
+others — adding CPU-only torch (~200 MB per version)
 to Blender's per-user
 modules folder (the Blender install itself is untouched, no admin
 needed); re-running the prep upgrades an older installed torch

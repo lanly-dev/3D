@@ -1605,17 +1605,80 @@ async function runBlenderPrep() {
       prepState({ phase: 'error', label: 'Blender not found' });
       return { ok: false, message: 'Blender not found' };
     }
-    const target = installs[0];
-    if (installs.length > 1) log(`Found ${installs.length} Blender installs; using the newest.`);
-    log(`Blender ${target.version} — ${target.dir}`);
-    // An installer Python for the Store route: the MeshCoder env's
-    // interpreter, whose pip can download wheels aimed at Blender's
-    // (different) Python version without launching Blender at all.
+    // Shared by every target: the installer Python for the Store
+    // route (the MeshCoder env's interpreter) and the clone home.
     const mcCfg = meshcoder.loadConfig();
     const mcDetect = mcCfg.python && mcCfg.home ? mcCfg : meshcoder.detect();
     const installerPython =
       mcCfg.python && fs.existsSync(mcCfg.python) ? mcCfg.python : mcDetect.python || null;
     const mcHome = mcCfg.home || mcDetect.home;
+    if (installs.length > 1) {
+      log(`Found ${installs.length} Blender installs — setting up every one (each version keeps its own modules and startup folders).`);
+    }
+    const results = [];
+    for (let i = 0; i < installs.length; i++) {
+      checkCancel();
+      const target = installs[i];
+      log(`=== Blender ${target.version} (${i + 1} of ${installs.length}) — ${target.dir}`);
+      prepState({ phase: 'running', label: `Preparing Blender ${target.version}…` });
+      try {
+        results.push({
+          version: target.version,
+          ...(await prepOneBlender(target, { log, registerChild, checkCancel, installerPython, mcHome })),
+        });
+      } catch (err) {
+        if (prepCancelled || /cancelled/i.test(String(err && err.message ? err.message : err))) throw err;
+        const msg = String(err && err.message ? err.message : err);
+        log(`Blender ${target.version} failed: ${msg}`);
+        results.push({ version: target.version, ok: false, label: msg });
+      }
+    }
+    const failed = results.filter((r) => !r.ok);
+    if (!failed.length) {
+      prepState({
+        phase: 'done',
+        label: results.length === 1 ? results[0].label || 'Blender is ready' : 'All Blender installs are ready',
+      });
+      return { ok: true };
+    }
+    if (failed.length < results.length) {
+      const names = failed.map((r) => r.version).join(', ');
+      log(`Some installs did not finish: Blender ${names} (see above). The others are ready.`);
+      prepState({ phase: 'error', label: `Blender ${names} did not finish` });
+      return { ok: true, message: `Blender ${names} did not finish` };
+    }
+    prepState({
+      phase: 'error',
+      label: results.length === 1 && failed[0].label ? failed[0].label : 'Preparation failed',
+    });
+    return { ok: false, message: failed[0].label || 'Preparation failed' };
+  } catch (err) {
+    const msg = String(err && err.message ? err.message : err);
+    if (prepCancelled || /cancelled/i.test(msg)) {
+      prepState({ phase: 'cancelled', label: 'Cancelled' });
+      log('Cancelled.');
+      return { ok: false, message: 'Preparation cancelled' };
+    }
+    log(`Failed: ${msg}`);
+    prepState({ phase: 'error', label: 'Preparation failed' });
+    return { ok: false, message: msg };
+  } finally {
+    prepRunning = false;
+    prepChild = null;
+  }
+}
+
+/**
+ * Set up ONE Blender install: torch (fresh install, or upgrade to
+ * the newest release), the startup script + numpy torch shim, the
+ * c10.dll probe, and verification. Resolves { ok, label } for the
+ * caller's summary; ordinary failures are reported through that
+ * result (or thrown — the caller records them per install and moves
+ * on), while cancellation throws so the whole prep stops. Split out
+ * of runBlenderPrep when prep went fully dynamic (2026-10-25, Lan's
+ * ask): every detected install gets set up, not just the newest.
+ */
+async function prepOneBlender(target, { log, registerChild, checkCancel, installerPython, mcHome }) {
     if (target.store) {
       log(
         installerPython
@@ -1708,8 +1771,7 @@ async function runBlenderPrep() {
       if (!dllProbe.ok) {
         log('c10.dll fails to load even outside Blender — a system runtime it needs is missing, usually the Microsoft Visual C++ 2015–2022 Redistributable (x64).');
         log('Install it from Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe), then re-run Prepare Blender.');
-        prepState({ phase: 'error', label: 'Missing Visual C++ runtime' });
-        return { ok: false, message: 'Missing Visual C++ runtime' };
+        return { ok: false, label: 'Missing Visual C++ runtime' };
       }
       log('c10.dll loads fine outside Blender — the DLL itself is healthy.');
       if (target.store) {
@@ -1772,13 +1834,11 @@ async function runBlenderPrep() {
               ? 'Set. Fully quit Blender (all windows) and restart it, then run the generated script again.'
               : 'Could not set it automatically — set the user environment variable KMP_DUPLICATE_LIB_OK to TRUE manually, then fully restart Blender.'
           );
-          prepState({ phase: 'done', label: 'One more step: restart Blender' });
-          return { ok: true };
+          return { ok: true, label: 'One more step: restart Blender' };
         }
         log('c10.dll fails outside Blender too — a system runtime it needs is missing, usually the Microsoft Visual C++ 2015–2022 Redistributable (x64).');
         log('Install it from Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe), then re-run Prepare Blender.');
-        prepState({ phase: 'error', label: 'Missing Visual C++ runtime' });
-        return { ok: false, message: 'Missing Visual C++ runtime' };
+        return { ok: false, label: 'Missing Visual C++ runtime' };
       }
       // For a Store install, failing to LAUNCH Blender from here is
       // a known platform limit, not an install failure: if Blender
@@ -1788,8 +1848,7 @@ async function runBlenderPrep() {
       if (target.store && !/ModuleNotFoundError|ImportError|Traceback/.test(detail)) {
         log('Blender could not be launched from here to verify (Store activation limits) — but torch is installed in the modules folder.');
         log('Restart Blender, then run the generated script: the bpy_lib import should now work.');
-        prepState({ phase: 'done', label: 'Installed — verify in Blender' });
-        return { ok: true };
+        return { ok: true, label: 'Installed — verify in Blender' };
       }
       log('Blender output (tail):');
       for (const l of detail.split('\n')) if (l.trim()) log(l);
@@ -1803,22 +1862,7 @@ async function runBlenderPrep() {
         : 'Verified: Blender imported torch successfully.'
     );
     log('Done. Restart Blender (if it is open), then run the generated script.');
-    prepState({ phase: 'done', label: 'Blender is ready' });
-    return { ok: true };
-  } catch (err) {
-    const msg = String(err && err.message ? err.message : err);
-    if (prepCancelled || /cancelled/i.test(msg)) {
-      prepState({ phase: 'cancelled', label: 'Cancelled' });
-      log('Cancelled.');
-      return { ok: false, message: 'Preparation cancelled' };
-    }
-    log(`Failed: ${msg}`);
-    prepState({ phase: 'error', label: 'Preparation failed' });
-    return { ok: false, message: msg };
-  } finally {
-    prepRunning = false;
-    prepChild = null;
-  }
+    return { ok: true, label: 'Blender is ready' };
 }
 
 function buildMenu() {
