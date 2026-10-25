@@ -41,9 +41,9 @@ function runStreaming(cmd, args, { onLog = () => {}, registerChild } = {}) {
 }
 
 /** Buffered spawn: resolves { code, out } — nonzero exit is not an error. */
-function runCapture(cmd, args, { timeoutMs = 120000, registerChild, onData } = {}) {
+function runCapture(cmd, args, { timeoutMs = 120000, registerChild, onData, shell } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { windowsHide: true });
+    const child = spawn(cmd, args, { windowsHide: true, shell: !!shell });
     if (registerChild) registerChild(child);
     let out = '';
     const timer = setTimeout(() => {
@@ -70,6 +70,86 @@ function runCapture(cmd, args, { timeoutMs = 120000, registerChild, onData } = {
       resolve({ code, out });
     });
   });
+}
+
+function quoteCmdArg(a) {
+  return `"${String(a).replace(/"/g, '\\"')}"`;
+}
+
+function psQuote(s) {
+  return `'${String(s).replace(/'/g, "''")}'`;
+}
+
+function safeRead(p) {
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/** Write a Python snippet to a temp file for `blender --background --python <file>`. */
+function tempPyFile(name, source) {
+  const p = path.join(os.tmpdir(), name);
+  fs.writeFileSync(p, source);
+  return p;
+}
+
+/**
+ * Launch a Store install's blender.exe and capture its output.
+ * Windows blocks a direct CreateProcess into the protected
+ * WindowsApps package folder (spawn EPERM), so this falls back in
+ * order: (1) direct spawn, (2) the command shell (which activates
+ * app aliases / Store packages), (3) PowerShell Start-Process with
+ * output redirected to files that are polled while it runs. Each
+ * fallback is announced via onLog. Resolves { code, out, via };
+ * throws only when every route fails to launch.
+ */
+async function runBlenderCapture(blender, args, { timeoutMs = 240000, registerChild, onLog = () => {}, onData } = {}) {
+  try {
+    const res = await runCapture(blender.exe, args, { timeoutMs, registerChild, onData });
+    return { ...res, via: 'direct' };
+  } catch (err) {
+    if (!/EPERM|EACCES/i.test(String(err && (err.code || err.message)))) throw err;
+    onLog(`Direct launch of Blender was blocked (${err.message}) — retrying through the command shell…`);
+  }
+  const cmdLine = [blender.exe, ...args].map(quoteCmdArg).join(' ');
+  try {
+    const res = await runCapture(cmdLine, [], { timeoutMs, registerChild, onData, shell: true });
+    if (res.code === 0) return { ...res, via: 'shell' };
+    onLog(`Shell launch exited with code ${res.code} — falling back to PowerShell Start-Process…`);
+  } catch (err) {
+    onLog(`Shell launch was blocked too (${err && err.message ? err.message : err}) — falling back to PowerShell Start-Process…`);
+  }
+  const outPath = path.join(os.tmpdir(), 'hunyuan3d-blender-out.log');
+  const errPath = path.join(os.tmpdir(), 'hunyuan3d-blender-err.log');
+  fs.writeFileSync(outPath, '');
+  fs.writeFileSync(errPath, '');
+  const argList = args.map((a) => (/\s/.test(String(a)) ? `"${a}"` : String(a))).join(' ');
+  const ps =
+    `$p = Start-Process -FilePath ${psQuote(blender.exe)} -ArgumentList ${psQuote(argList)} ` +
+    `-Wait -PassThru -NoNewWindow -RedirectStandardOutput ${psQuote(outPath)} ` +
+    `-RedirectStandardError ${psQuote(errPath)}; exit $p.ExitCode`;
+  let streamed = 0;
+  const poll = () => {
+    if (!onData) return;
+    const snap = safeRead(outPath) + safeRead(errPath);
+    if (snap.length > streamed) {
+      onData(snap.slice(streamed));
+      streamed = snap.length;
+    }
+  };
+  const timer = setInterval(poll, 1500);
+  try {
+    const res = await runCapture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+      timeoutMs,
+      registerChild,
+    });
+    poll();
+    return { code: res.code, out: safeRead(outPath) + safeRead(errPath), via: 'powershell' };
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 function compareVersions(a, b) {
@@ -340,12 +420,13 @@ async function installTorch(blender, { onLog = () => {}, registerChild } = {}) {
   fs.mkdirSync(blender.modulesDir, { recursive: true });
   if (blender.store) {
     if (!blender.exe) throw new Error('Store install has no launchable blender.exe');
-    const scriptPath = path.join(os.tmpdir(), 'hunyuan3d-torch-install.py');
-    fs.writeFileSync(scriptPath, storeInstallScript(blender.modulesDir));
+    onLog(`Launching Blender: ${blender.exe}`);
+    const scriptPath = tempPyFile('hunyuan3d-torch-install.py', storeInstallScript(blender.modulesDir));
     let buf = '';
-    const res = await runCapture(blender.exe, ['--background', '--python', scriptPath], {
+    const res = await runBlenderCapture(blender, ['--background', '--python', scriptPath], {
       timeoutMs: 900000,
       registerChild,
+      onLog,
       onData: (chunk) => {
         buf += chunk;
         const lines = buf.split(/\r?\n/);
@@ -354,6 +435,7 @@ async function installTorch(blender, { onLog = () => {}, registerChild } = {}) {
       },
     });
     if (buf.trim()) onLog(buf.slice(0, 300));
+    if (res.via !== 'direct') onLog(`(Blender was launched via the ${res.via} route)`);
     if (!res.out.includes('TORCH_INSTALL_OK')) {
       throw new Error('Blender-side pip install did not complete (see the output above)');
     }
@@ -377,12 +459,12 @@ async function installTorch(blender, { onLog = () => {}, registerChild } = {}) {
  * stamped generated script). Without a clone, verify torch alone.
  * Resolves { ok, mode, detail } — mode is 'bpy_lib' or 'torch'.
  */
-async function verifyBlender(blender, meshcoderHome, { registerChild } = {}) {
+async function verifyBlender(blender, meshcoderHome, { registerChild, onLog = () => {} } = {}) {
   if (!blender.exe) return { ok: false, mode: 'none', detail: 'blender.exe not found next to its Python' };
   const scriptsDir = meshcoderHome
     ? path.join(meshcoderHome, 'src', 'llama_recipes', 'blender_scripts')
     : null;
-  const expr =
+  const source =
     scriptsDir && fs.existsSync(path.join(scriptsDir, 'bpy_lib.py'))
       ? [
           'import sys',
@@ -391,11 +473,14 @@ async function verifyBlender(blender, meshcoderHome, { registerChild } = {}) {
           'print("BPYLIB_OK")',
         ].join('\n')
       : ['import torch', 'print("TORCH_OK " + torch.__version__)'].join('\n');
-  const mode = expr.includes('BPYLIB_OK') ? 'bpy_lib' : 'torch';
-  const res = await runCapture(blender.exe, ['--background', '--python-expr', expr], {
-    timeoutMs: 240000,
-    registerChild,
-  });
+  const mode = source.includes('BPYLIB_OK') ? 'bpy_lib' : 'torch';
+  // A temp script file instead of --python-expr: the fallback launch
+  // routes (shell / Start-Process) cannot quote a multi-line expr.
+  const scriptPath = tempPyFile('hunyuan3d-verify.py', source);
+  const args = ['--background', '--python', scriptPath];
+  const res = blender.store
+    ? await runBlenderCapture(blender, args, { timeoutMs: 240000, registerChild, onLog })
+    : await runCapture(blender.exe, args, { timeoutMs: 240000, registerChild });
   const ok = mode === 'bpy_lib' ? res.out.includes('BPYLIB_OK') : res.out.includes('TORCH_OK');
   const tail = res.out.trim().split('\n').slice(-6).join('\n');
   return { ok, mode, detail: tail };
@@ -408,6 +493,7 @@ module.exports = {
   queryStorePackages,
   parseStorePackagesOutput,
   aliasProbe,
+  runBlenderCapture,
   storeEntries,
   storeInstallScript,
   defaultRoots,

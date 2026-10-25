@@ -140,7 +140,10 @@ to Blender's per-user
 modules folder (the Blender install itself is untouched, no admin
 needed), and verifies by having Blender import `bpy_lib` headless.
 For Store installs the pip step runs through Blender itself, since
-the Store package folder is protected.
+the Store package folder is protected — and because Windows also
+blocks directly launching a Store app's exe, the launch falls back
+through the command shell and PowerShell's Start-Process as needed
+(each attempt is noted in the log).
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a

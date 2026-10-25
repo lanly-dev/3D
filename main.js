@@ -1589,7 +1589,7 @@ async function runBlenderPrep() {
         ? 'Launching Blender headless to import bpy_lib…'
         : 'Launching Blender headless to import torch (no MeshCoder clone found for the full bpy_lib check)…'
     );
-    const verdict = await blenderprep.verifyBlender(target, home, { registerChild });
+    const verdict = await blenderprep.verifyBlender(target, home, { registerChild, onLog: log });
     if (!verdict.ok) {
       log('Blender output (tail):');
       for (const l of String(verdict.detail || '').split('\n')) if (l.trim()) log(l);
