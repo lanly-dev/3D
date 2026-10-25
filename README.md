@@ -151,7 +151,12 @@ torch is found but its DLLs fail to initialize inside Blender
 (WinError 1114), the prep probes `c10.dll` in a neutral process to
 tell a DLL conflict (it sets `KMP_DUPLICATE_LIB_OK=TRUE` for the
 classic duplicate-OpenMP clash; restart Blender afterwards) from a
-missing Visual C++ runtime (it points at the installer).
+missing Visual C++ runtime (it points at the installer). The prep
+also writes a small startup script into Blender's per-user
+`scripts\startup` folder that puts the MeshCoder clone's
+`blender_scripts` folder on `sys.path` at every Blender launch —
+so generated scripts run with no console line and no reliance on
+the header stamped into newer conversions.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a

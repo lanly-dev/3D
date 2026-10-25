@@ -603,6 +603,50 @@ async function probeDll(python, dllPath, { registerChild } = {}) {
   }
 }
 
+/**
+ * Source of the Blender startup script Prepare Blender installs.
+ * Blender executes every .py in <user scripts>/startup at launch,
+ * so this puts MeshCoder's blender_scripts folder on sys.path
+ * permanently — generated scripts then run with no console line and
+ * no reliance on the stamped header, old files included. Tries the
+ * clone location known at prep time first, then the app's managed
+ * clone location.
+ */
+function startupScriptSource(meshcoderHome) {
+  const baked = meshcoderHome
+    ? path.join(meshcoderHome, 'src', 'llama_recipes', 'blender_scripts')
+    : null;
+  const candidates = [
+    ...(baked ? [JSON.stringify(baked)] : []),
+    "_h3d_os.path.join(_h3d_os.path.expanduser('~'), 'Documents', 'Hunyuan3D', 'MeshCoder', 'src', 'llama_recipes', 'blender_scripts')",
+  ];
+  return [
+    '# Hunyuan3D Desktop: make MeshCoder\'s bpy_lib importable in Blender.',
+    '# Written by Tools > Prepare Blender (Hunyuan3D app). Blender runs',
+    '# this at every startup; deleting this file undoes it. It only adds',
+    "# the MeshCoder clone's blender_scripts folder to sys.path, so",
+    '# generated scripts (from bpy_lib import *) run as-is.',
+    'import os as _h3d_os, sys as _h3d_sys',
+    `for _h3d_p in (${candidates.join(', ')},):`,
+    '    if _h3d_os.path.isdir(_h3d_p) and _h3d_p not in _h3d_sys.path:',
+    '        _h3d_sys.path.append(_h3d_p)',
+    '',
+  ].join('\n');
+}
+
+/** Where the startup script lives for an install (sibling of modules/). */
+function startupScriptPath(blender) {
+  return path.join(path.dirname(blender.modulesDir), 'startup', 'hunyuan3d_meshcoder_path.py');
+}
+
+/** Write (or refresh) the startup script. Returns its path. */
+function installStartupScript(blender, meshcoderHome) {
+  const file = startupScriptPath(blender);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, startupScriptSource(meshcoderHome));
+  return file;
+}
+
 module.exports = {
   TORCH_INDEX,
   findBlenders,
@@ -617,6 +661,9 @@ module.exports = {
   installTorchForeign,
   torchDllPath,
   probeDll,
+  startupScriptSource,
+  startupScriptPath,
+  installStartupScript,
   storeEntries,
   storeInstallScript,
   defaultRoots,

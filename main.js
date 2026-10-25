@@ -1570,6 +1570,7 @@ async function runBlenderPrep() {
     const mcDetect = mcCfg.python && mcCfg.home ? mcCfg : meshcoder.detect();
     const installerPython =
       mcCfg.python && fs.existsSync(mcCfg.python) ? mcCfg.python : mcDetect.python || null;
+    const mcHome = mcCfg.home || mcDetect.home;
     if (target.store) {
       log(
         installerPython
@@ -1593,8 +1594,23 @@ async function runBlenderPrep() {
       log('torch installed.');
     }
 
+    // Startup script: Blender runs <user scripts>/startup/*.py at
+    // every launch, so this puts the clone's blender_scripts folder
+    // on sys.path permanently — generated scripts (stamped or not,
+    // old files included) then need no console line at all.
+    try {
+      const scriptFile = blenderprep.installStartupScript(target, mcHome);
+      log(`Startup script written: ${scriptFile}`);
+      log('From now on Blender finds bpy_lib by itself at launch.');
+    } catch (err) {
+      log(
+        `Could not write the Blender startup script (${err && err.message ? err.message : err}) — converted scripts still carry the stamped header, so they run anyway.`
+      );
+    }
+    checkCancel();
+
     prepState({ phase: 'running', label: 'Verifying in Blender…' });
-    const home = mcCfg.home || mcDetect.home;
+    const home = mcHome;
     log(
       home
         ? 'Launching Blender headless to import bpy_lib…'
