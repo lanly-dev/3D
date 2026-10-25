@@ -599,15 +599,30 @@ function blenderHeader(home) {
 }
 
 /**
- * Prepend the bpy_lib header to a generated script. Idempotent: a
- * file already carrying the marker is left alone. Returns true when
- * the header was added. Only lines are added at the top — the model's
- * code below is untouched.
+ * Prepend the bpy_lib header to a generated script, or upgrade an
+ * older header in place. Idempotent: a file whose header already
+ * carries the torch fallback is left alone. A file stamped before
+ * the fallback existed gets the new header spliced over the old
+ * header block (located by its markers; anything above it, like the
+ * conversion-notes block, and the model's code below are preserved),
+ * so existing files gain the fallback without a reconversion. If the
+ * old block's end marker can't be found, the file is left untouched
+ * rather than risk corrupting it. Returns true when the file changed.
  */
 function stampBlenderHeader(codePath, home) {
   const src = fs.readFileSync(codePath, 'utf8');
-  if (src.includes(HEADER_MARKER)) return false;
-  fs.writeFileSync(codePath, blenderHeader(home) + src);
+  if (!src.includes(HEADER_MARKER)) {
+    fs.writeFileSync(codePath, blenderHeader(home) + src);
+    return true;
+  }
+  if (src.includes('_h3d_shim')) return false;
+  const endMarker = '# --- end Hunyuan3D header ---';
+  const start = src.indexOf(HEADER_MARKER);
+  const endIdx = src.indexOf(endMarker);
+  if (start < 0 || endIdx < start) return false;
+  let tail = src.slice(endIdx + endMarker.length);
+  tail = tail.replace(/^\r?\n/, '').replace(/^(\r?\n){0,2}/, '');
+  fs.writeFileSync(codePath, src.slice(0, start) + blenderHeader(home) + tail);
   return true;
 }
 

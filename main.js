@@ -1211,6 +1211,28 @@ async function openMeshcoderConfig() {
  * env's python (configured, or auto-detected). Conversions still
  * never modify their output — fixing happens only here, on demand.
  */
+/**
+ * Bring a generated script's stamped header current (see
+ * meshcoder.stampBlenderHeader): a file converted before the header
+ * carried the torch fallback gets it spliced in here, so it runs in
+ * Blender even where its torch will not load — no reconversion
+ * needed. Only for MeshCoder scripts (they reference bpy_lib); the
+ * stand-in file is refreshed alongside. Best-effort: returns the
+ * note to append to the verify message, or '' when nothing changed.
+ */
+function headerUpgradeNote(filePath) {
+  try {
+    const text = fs.readFileSync(filePath, 'utf8');
+    if (!text.includes('bpy_lib')) return '';
+    meshcoder.ensureTorchShim();
+    return meshcoder.stampBlenderHeader(filePath, meshcoder.loadConfig().home)
+      ? ' Header updated: it now carries the torch fallback, so it runs even where Blender\'s torch won\'t load.'
+      : '';
+  } catch {
+    return '';
+  }
+}
+
 async function verifyAssetFile(id) {
   const found = assets.find(String(id || ''));
   if (!found) return 'Asset not found';
@@ -1237,10 +1259,10 @@ async function verifyAssetFile(id) {
     }
     const stillBad = await meshcoder.checkSyntax(python, found.filePath);
     if (!stillBad) {
-      return `Verify and fix: ${name} — fixed (${repair.changes.join('; ')}). Now parses cleanly. Original saved as ${name}.orig`;
+      return `Verify and fix: ${name} — fixed (${repair.changes.join('; ')}). Now parses cleanly. Original saved as ${name}.orig${headerUpgradeNote(found.filePath)}`;
     }
   }
-  if (!issue) return `Verify and fix: ${name} — parses cleanly. Blender can run it.`;
+  if (!issue) return `Verify and fix: ${name} — parses cleanly. Blender can run it.${headerUpgradeNote(found.filePath)}`;
   return `Verify and fix: ${name} — ⚠ syntax error at line ${issue.line}: ${issue.message} — couldn't fix it automatically${issue.text ? `\n${issue.text}` : ''}`;
 }
 

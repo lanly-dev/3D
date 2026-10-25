@@ -157,7 +157,9 @@ load. Shells under 1% of the total surface are
 treated as fragments and skipped (noted in the file). After
 hand-fixing a line, right-click the script's row and choose
 **Verify and fix** to re-run the repair + validation on demand
-(backing the original up as `<file>.orig`).
+(backing the original up as `<file>.orig`). Verify also brings the
+file's stamped header current, so scripts converted before the
+header carried the torch fallback gain it without a reconversion.
 
 One more one-time step on the Blender side: `bpy_lib` imports
 `torch`, which Blender's Python doesn't ship. **Tools → Prepare
