@@ -1551,7 +1551,7 @@ async function runBlenderPrep() {
   };
   try {
     prepState({ phase: 'running', label: 'Finding Blender…' });
-    const installs = await blenderprep.findBlenders(app.getPath('appData'));
+    const installs = await blenderprep.findBlenders(app.getPath('appData'), undefined, log);
     if (!installs.length) {
       log('No Blender installation found — checked the standard locations:');
       for (const r of blenderprep.defaultRoots()) log(`  ${r}`);

@@ -140,33 +140,105 @@ function defaultRoots() {
 }
 
 /**
- * Ask Windows about Microsoft Store Blender packages. Store installs
- * live under C:\Program Files\WindowsApps\<package>\, a protected
- * folder that cannot be scanned directly — but Get-AppxPackage
- * reports each package's install location. Resolves [] anywhere
- * else (non-Windows, PowerShell missing, no package).
+ * Parse Get-AppxPackage JSON output (a single object, or an array
+ * when several packages match) into plain { name, version,
+ * installLocation } records. Unparseable output yields [].
  */
-async function queryStorePackages() {
-  if (process.platform !== 'win32') return [];
-  const script =
-    'Get-AppxPackage -Name "BlenderFoundation.Blender" | ' +
-    "Select-Object @{n='Version';e={$_.Version.ToString()}}, InstallLocation | " +
-    'ConvertTo-Json -Compress';
+function parseStorePackagesOutput(out) {
   try {
-    const res = await runCapture(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-Command', script],
-      { timeoutMs: 30000 }
-    );
-    if (res.code !== 0 || !res.out.trim()) return [];
-    const parsed = JSON.parse(res.out.trim());
+    const parsed = JSON.parse(String(out || '').trim());
     const list = Array.isArray(parsed) ? parsed : [parsed];
     return list
       .filter((p) => p && p.InstallLocation)
-      .map((p) => ({ version: String(p.Version || ''), installLocation: String(p.InstallLocation) }));
+      .map((p) => ({
+        name: String(p.Name || ''),
+        version: String(p.Version || ''),
+        installLocation: String(p.InstallLocation),
+      }));
   } catch {
     return [];
   }
+}
+
+/**
+ * Ask Windows about Microsoft Store Blender packages. Store installs
+ * live under C:\Program Files\WindowsApps\<package>\, a protected
+ * folder that cannot be scanned directly — but Get-AppxPackage
+ * reports each package's install location. Every failure mode is
+ * reported through onDiag (this used to swallow errors silently,
+ * which made a missed detection undebuggable from the prep log).
+ */
+async function queryStorePackages(onDiag = () => {}) {
+  if (process.platform !== 'win32') {
+    onDiag('Store query skipped (not Windows)');
+    return [];
+  }
+  const script =
+    "Get-AppxPackage | Where-Object { $_.Name -like '*Blender*' } | " +
+    "Select-Object @{n='Name';e={$_.Name}}, @{n='Version';e={$_.Version.ToString()}}, InstallLocation | " +
+    'ConvertTo-Json -Compress';
+  let res;
+  try {
+    res = await runCapture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      timeoutMs: 30000,
+    });
+  } catch (err) {
+    onDiag(`Store query could not run PowerShell: ${err && err.message ? err.message : err}`);
+    return [];
+  }
+  if (res.code !== 0) {
+    const tail = res.out.trim().split('\n').slice(-3).join(' ').slice(0, 240);
+    onDiag(`Store query exited with code ${res.code}${tail ? `: ${tail}` : ''}`);
+    return [];
+  }
+  const pkgs = parseStorePackagesOutput(res.out).filter((p) => /blender/i.test(p.name) || /blender/i.test(p.installLocation));
+  onDiag(
+    pkgs.length
+      ? `Store query found: ${pkgs.map((p) => `${p.name || 'Blender'} ${p.version}`).join('; ')}`
+      : 'Store query ran but no Blender package was returned'
+  );
+  return pkgs;
+}
+
+/**
+ * Last-resort Store detection: the app execution alias. Store
+ * installs register %LOCALAPPDATA%\Microsoft\WindowsApps\blender.exe;
+ * if it exists, `blender.exe --version` reports the version, which is
+ * all a Store entry needs (install and verification both go through
+ * Blender itself; the package's python.exe is never spawned).
+ */
+async function aliasProbe(appData, onDiag = () => {}) {
+  const local = process.env.LOCALAPPDATA || '';
+  if (!local) return null;
+  const alias = path.join(local, 'Microsoft', 'WindowsApps', 'blender.exe');
+  if (!fs.existsSync(alias)) {
+    onDiag('No blender.exe app alias found');
+    return null;
+  }
+  onDiag(`Found the app alias: ${alias}`);
+  let res;
+  try {
+    res = await runCapture(alias, ['--version'], { timeoutMs: 30000 });
+  } catch (err) {
+    onDiag(`Alias --version failed to launch: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+  const m = /Blender\s+(\d+)\.(\d+)/.exec(res.out || '');
+  if (!m) {
+    onDiag(`Alias ran but its version output was unreadable (exit ${res.code})`);
+    return null;
+  }
+  const version = `${m[1]}.${m[2]}`;
+  onDiag(`Alias reports Blender ${version}`);
+  return {
+    version,
+    dir: '(Microsoft Store — launched via app alias)',
+    exe: alias,
+    python: null,
+    modulesDir: path.join(appData, 'Blender Foundation', 'Blender', version, 'scripts', 'modules'),
+    store: true,
+    viaAlias: true,
+  };
 }
 
 /**
@@ -200,24 +272,34 @@ function storeEntries(packages, appData) {
 }
 
 /**
- * All detected installs — standard folders plus Microsoft Store
- * packages — newest version first. On a version tie the standard
- * install wins (its Python is directly runnable; the Store package
- * folder is protected).
+ * All detected installs — standard folders, then Microsoft Store
+ * packages, then (only if no Store entry came out of the package
+ * query) the app-alias probe — newest version first. On a version
+ * tie a standard install wins, then a package entry (it knows its
+ * Python path), then an alias-only entry.
  */
-async function findBlenders(appData, packages) {
+async function findBlenders(appData, packages, onDiag = () => {}) {
   const all = [];
   for (const root of defaultRoots()) all.push(...findBlendersInRoot(root, appData));
-  const pkgs = packages !== undefined ? packages : await queryStorePackages();
-  all.push(...storeEntries(pkgs, appData));
+  onDiag(`Standard folder scan: ${all.length} install(s)`);
+  const pkgs = packages !== undefined ? packages : await queryStorePackages(onDiag);
+  const store = storeEntries(pkgs, appData);
+  all.push(...store);
+  if (!all.length) {
+    // Nothing found by folder or package: one last probe, so a stale
+    // alias from an old install can never outrank a real detection.
+    const viaAlias = await aliasProbe(appData, onDiag);
+    if (viaAlias) all.push(viaAlias);
+  }
+  const rank = (b) => (b.store ? (b.viaAlias ? 2 : 1) : 0);
   const byKey = new Map();
   for (const b of all) {
     const key = `${b.version}|${b.modulesDir}`;
     const prev = byKey.get(key);
-    if (!prev || (prev.store && !b.store)) byKey.set(key, b);
+    if (!prev || rank(b) < rank(prev)) byKey.set(key, b);
   }
   return [...byKey.values()].sort(
-    (a, b) => compareVersions(b.version, a.version) || Number(a.store || false) - Number(b.store || false)
+    (a, b) => compareVersions(b.version, a.version) || rank(a) - rank(b)
   );
 }
 
@@ -324,6 +406,8 @@ module.exports = {
   findBlenders,
   findBlendersInRoot,
   queryStorePackages,
+  parseStorePackagesOutput,
+  aliasProbe,
   storeEntries,
   storeInstallScript,
   defaultRoots,
