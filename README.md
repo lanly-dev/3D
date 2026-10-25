@@ -130,7 +130,12 @@ not luck: decoding is deterministic, and the mesh is first split into
 its shells (connected components) so MeshCoder generates **one short
 program per part** in a single shared coordinate frame — long
 whole-object generations are where its code falls apart (fused calls,
-truncation). A single-shell mesh converts whole, exactly as before.
+truncation). A mesh that arrives as one welded shell is instead cut
+at its **necks**: local thickness is measured per face (inward ray
+casts), thick regions separated by thin junctions become the parts,
+and every face is regrown into its nearest part so borders land
+mid-neck. When no clear necks exist, the mesh converts whole,
+exactly as before.
 Each part's object names are prefixed (`p1_`, `p2_`, …) so parts
 can't collide, the parts are assembled under one header, and the
 result passes a **correctness gate**: the deterministic formatting

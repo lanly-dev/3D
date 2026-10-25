@@ -410,7 +410,9 @@ async function convertToCode(meshPath, outDir, opts = {}) {
     const partFiles = Array.isArray(manifest.parts) ? manifest.parts : [];
     if (!partFiles.length) throw new Error('Mesh splitting found no convertible parts.');
     const gateNotes = [];
-    if (partFiles.length > 1 && onLog) {
+    if (manifest.neckSplit) {
+      if (onLog) onLog(`One welded shell — cut into ${partFiles.length} parts at the necks`);
+    } else if (partFiles.length > 1 && onLog) {
       onLog(`Split into ${partFiles.length} parts by shell — one short generation each`);
     }
     if (manifest.droppedAreaFraction >= 0.005) {
@@ -472,7 +474,13 @@ async function convertToCode(meshPath, outDir, opts = {}) {
       }
       finalSource = repairedCodes.join('\n');
     }
-    if (partFiles.length > 1) gateNotes.unshift(`converted in ${partFiles.length} parts (split by shell)`);
+    if (partFiles.length > 1) {
+      gateNotes.unshift(
+        manifest.neckSplit
+          ? `converted in ${partFiles.length} parts (neck split)`
+          : `converted in ${partFiles.length} parts (split by shell)`
+      );
+    }
     if (onGateNotes) onGateNotes(gateNotes);
     if (gateNotes.length) {
       const block = [
