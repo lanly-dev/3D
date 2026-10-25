@@ -14,6 +14,7 @@
  * and imports bpy_lib for real.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -40,7 +41,7 @@ function runStreaming(cmd, args, { onLog = () => {}, registerChild } = {}) {
 }
 
 /** Buffered spawn: resolves { code, out } — nonzero exit is not an error. */
-function runCapture(cmd, args, { timeoutMs = 120000, registerChild } = {}) {
+function runCapture(cmd, args, { timeoutMs = 120000, registerChild, onData } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { windowsHide: true });
     if (registerChild) registerChild(child);
@@ -54,9 +55,11 @@ function runCapture(cmd, args, { timeoutMs = 120000, registerChild } = {}) {
     }, timeoutMs);
     child.stdout.on('data', (d) => {
       out += d;
+      if (onData) onData(String(d));
     });
     child.stderr.on('data', (d) => {
       out += d;
+      if (onData) onData(String(d));
     });
     child.on('error', (err) => {
       clearTimeout(timer);
@@ -136,15 +139,86 @@ function defaultRoots() {
   return roots;
 }
 
-/** All detected installs, newest version first, deduped by python. */
-function findBlenders(appData) {
-  const byPython = new Map();
-  for (const root of defaultRoots()) {
-    for (const b of findBlendersInRoot(root, appData)) {
-      if (!byPython.has(b.python)) byPython.set(b.python, b);
-    }
+/**
+ * Ask Windows about Microsoft Store Blender packages. Store installs
+ * live under C:\Program Files\WindowsApps\<package>\, a protected
+ * folder that cannot be scanned directly — but Get-AppxPackage
+ * reports each package's install location. Resolves [] anywhere
+ * else (non-Windows, PowerShell missing, no package).
+ */
+async function queryStorePackages() {
+  if (process.platform !== 'win32') return [];
+  const script =
+    'Get-AppxPackage -Name "BlenderFoundation.Blender" | ' +
+    "Select-Object @{n='Version';e={$_.Version.ToString()}}, InstallLocation | " +
+    'ConvertTo-Json -Compress';
+  try {
+    const res = await runCapture(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { timeoutMs: 30000 }
+    );
+    if (res.code !== 0 || !res.out.trim()) return [];
+    const parsed = JSON.parse(res.out.trim());
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list
+      .filter((p) => p && p.InstallLocation)
+      .map((p) => ({ version: String(p.Version || ''), installLocation: String(p.InstallLocation) }));
+  } catch {
+    return [];
   }
-  return [...byPython.values()].sort((a, b) => compareVersions(b.version, a.version));
+}
+
+/**
+ * Map Store packages to install entries. The package layout mirrors
+ * the normal one under a `Blender` subfolder:
+ *   <pkg>\Blender\blender.exe
+ *   <pkg>\Blender\<major.minor>\python\bin\python.exe
+ * Paths are constructed, not probed — the WindowsApps folder denies
+ * casual listing, so existence is proven by the flow's own steps,
+ * not by fs checks here. The exe prefers the app execution alias in
+ * %LOCALAPPDATA%\Microsoft\WindowsApps, the sanctioned launch path.
+ */
+function storeEntries(packages, appData) {
+  const out = [];
+  const local = process.env.LOCALAPPDATA || '';
+  const alias = local ? path.join(local, 'Microsoft', 'WindowsApps', 'blender.exe') : null;
+  for (const pkg of packages || []) {
+    const short = pkg.version.split('.').slice(0, 2).join('.');
+    if (!/^\d+\.\d+$/.test(short) || !pkg.installLocation) continue;
+    const dir = path.join(pkg.installLocation, 'Blender');
+    out.push({
+      version: short,
+      dir,
+      exe: alias && fs.existsSync(alias) ? alias : path.join(dir, 'blender.exe'),
+      python: path.join(dir, short, 'python', 'bin', 'python.exe'),
+      modulesDir: path.join(appData, 'Blender Foundation', 'Blender', short, 'scripts', 'modules'),
+      store: true,
+    });
+  }
+  return out;
+}
+
+/**
+ * All detected installs — standard folders plus Microsoft Store
+ * packages — newest version first. On a version tie the standard
+ * install wins (its Python is directly runnable; the Store package
+ * folder is protected).
+ */
+async function findBlenders(appData, packages) {
+  const all = [];
+  for (const root of defaultRoots()) all.push(...findBlendersInRoot(root, appData));
+  const pkgs = packages !== undefined ? packages : await queryStorePackages();
+  all.push(...storeEntries(pkgs, appData));
+  const byKey = new Map();
+  for (const b of all) {
+    const key = `${b.version}|${b.modulesDir}`;
+    const prev = byKey.get(key);
+    if (!prev || (prev.store && !b.store)) byKey.set(key, b);
+  }
+  return [...byKey.values()].sort(
+    (a, b) => compareVersions(b.version, a.version) || Number(a.store || false) - Number(b.store || false)
+  );
 }
 
 /** True when a torch package already sits in the install's modules folder. */
@@ -153,12 +227,56 @@ function torchInModules(blender) {
 }
 
 /**
- * Install CPU-only torch into the install's per-user modules folder.
- * Streams pip's output to onLog. Uses the Blender python's own pip
- * (bootstrapped via ensurepip when missing).
+ * The pip script run INSIDE Blender for Microsoft Store installs.
+ * The Store package folder is protected, so the app cannot spawn
+ * the package's python.exe directly — but Blender itself can run
+ * its own Python via subprocess, inside its own package context.
+ */
+function storeInstallScript(modulesDir) {
+  return [
+    'import subprocess, sys',
+    'def run(args):',
+    "    print('+ ' + ' '.join(args), flush=True)",
+    '    subprocess.check_call(args)',
+    'try:',
+    "    run([sys.executable, '-m', 'ensurepip', '--default-pip'])",
+    'except Exception as e:',
+    "    print('ensurepip skipped:', e, flush=True)",
+    `run([sys.executable, '-m', 'pip', 'install', '--target', ${JSON.stringify(modulesDir)}, 'torch', '--index-url', ${JSON.stringify(TORCH_INDEX)}])`,
+    "print('TORCH_INSTALL_OK', flush=True)",
+    '',
+  ].join('\n');
+}
+
+/**
+ * Install CPU-only torch into the install's per-user modules folder,
+ * streaming output to onLog. Standard installs use Blender's Python
+ * directly (its pip bootstrapped via ensurepip when missing); Store
+ * installs run the same pip through Blender itself (see above).
  */
 async function installTorch(blender, { onLog = () => {}, registerChild } = {}) {
   fs.mkdirSync(blender.modulesDir, { recursive: true });
+  if (blender.store) {
+    if (!blender.exe) throw new Error('Store install has no launchable blender.exe');
+    const scriptPath = path.join(os.tmpdir(), 'hunyuan3d-torch-install.py');
+    fs.writeFileSync(scriptPath, storeInstallScript(blender.modulesDir));
+    let buf = '';
+    const res = await runCapture(blender.exe, ['--background', '--python', scriptPath], {
+      timeoutMs: 900000,
+      registerChild,
+      onData: (chunk) => {
+        buf += chunk;
+        const lines = buf.split(/\r?\n/);
+        buf = lines.pop();
+        for (const line of lines) if (line.trim()) onLog(line.slice(0, 300));
+      },
+    });
+    if (buf.trim()) onLog(buf.slice(0, 300));
+    if (!res.out.includes('TORCH_INSTALL_OK')) {
+      throw new Error('Blender-side pip install did not complete (see the output above)');
+    }
+    return;
+  }
   try {
     await runStreaming(blender.python, ['-m', 'ensurepip', '--default-pip'], { onLog, registerChild });
   } catch {
@@ -205,6 +323,9 @@ module.exports = {
   TORCH_INDEX,
   findBlenders,
   findBlendersInRoot,
+  queryStorePackages,
+  storeEntries,
+  storeInstallScript,
   defaultRoots,
   compareVersions,
   torchInModules,

@@ -1551,17 +1551,21 @@ async function runBlenderPrep() {
   };
   try {
     prepState({ phase: 'running', label: 'Finding Blender…' });
-    const installs = blenderprep.findBlenders(app.getPath('appData'));
+    const installs = await blenderprep.findBlenders(app.getPath('appData'));
     if (!installs.length) {
-      log('No Blender installation found in the standard locations:');
+      log('No Blender installation found — checked the standard locations:');
       for (const r of blenderprep.defaultRoots()) log(`  ${r}`);
-      log('Install Blender 4.x from blender.org, then re-run. (Portable or Steam installs in custom folders are not detected yet.)');
+      log('…and Microsoft Store packages (Get-AppxPackage).');
+      log('Install Blender 4.x from blender.org or the Microsoft Store, then re-run. (Portable installs in custom folders are not detected yet.)');
       prepState({ phase: 'error', label: 'Blender not found' });
       return { ok: false, message: 'Blender not found' };
     }
     const target = installs[0];
     if (installs.length > 1) log(`Found ${installs.length} Blender installs; using the newest.`);
     log(`Blender ${target.version} — ${target.dir}`);
+    if (target.store) {
+      log('Microsoft Store install: the package folder is protected, so pip will run through Blender itself.');
+    }
     log(`Modules folder: ${target.modulesDir}`);
     checkCancel();
 

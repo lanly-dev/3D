@@ -132,10 +132,13 @@ hand-fixing a line, right-click the script's row and choose
 
 One more one-time step on the Blender side: `bpy_lib` imports
 `torch`, which Blender's Python doesn't ship. **Tools → Prepare
-Blender for MeshCoder scripts…** finds your Blender install,
-adds CPU-only torch (~200 MB) to Blender's per-user modules folder
-(the Blender install itself is untouched, no admin needed), and
-verifies by having Blender import `bpy_lib` headless.
+Blender for MeshCoder scripts…** finds your Blender install
+(including Microsoft Store installs, which it looks up as app
+packages), adds CPU-only torch (~200 MB) to Blender's per-user
+modules folder (the Blender install itself is untouched, no admin
+needed), and verifies by having Blender import `bpy_lib` headless.
+For Store installs the pip step runs through Blender itself, since
+the Store package folder is protected.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
