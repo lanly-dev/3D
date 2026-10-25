@@ -396,13 +396,83 @@ function torchInModules(blender) {
   return fs.existsSync(path.join(blender.modulesDir, 'torch'));
 }
 
+/** The version of the torch in the modules folder ('2.9.0'), or null. */
+function installedTorchVersion(blender) {
+  const clean = (v) => (v ? String(v).split('+')[0].trim() || null : null);
+  try {
+    const src = fs.readFileSync(path.join(blender.modulesDir, 'torch', 'version.py'), 'utf8');
+    const m = src.match(/__version__\s*=\s*['"]([^'"]+)['"]/);
+    if (m) return clean(m[1]);
+  } catch {
+    /* fall through to the dist-info folder name */
+  }
+  try {
+    const dist = fs
+      .readdirSync(blender.modulesDir)
+      .find((f) => /^torch-.*\.dist-info$/i.test(f));
+    if (dist) return clean(dist.slice('torch-'.length, -'.dist-info'.length));
+  } catch {
+    /* no modules folder yet */
+  }
+  return null;
+}
+
+/**
+ * Newest torch version whose CPU-index wheels include one for the
+ * given Blender (its bundled Python, win_amd64). `filenames` is the
+ * file list from the index's simple API. Pure — testable.
+ */
+function pickNewestTorchWheel(filenames, blenderVersion) {
+  const py = blenderPythonFor(blenderVersion).replace('.', '');
+  const re = new RegExp(
+    `^torch-([0-9]+(?:\\.[0-9]+)*)(?:\\+cpu)?-cp${py}-cp${py}-win_amd64\\.whl$`
+  );
+  let best = null;
+  for (const f of filenames || []) {
+    const m = String(f).match(re);
+    if (m && (!best || compareVersions(m[1], best) > 0)) best = m[1];
+  }
+  return best;
+}
+
+/**
+ * Ask the PyTorch CPU index for the newest torch version available
+ * for this Blender's Python. Resolves null when the check cannot be
+ * made (offline, index changed…) — callers treat that as "keep what
+ * is installed", never as an error.
+ */
+async function fetchNewestTorchVersion(blender, { timeoutMs = 20000 } = {}) {
+  try {
+    const res = await fetch(`${TORCH_INDEX}/torch/`, {
+      headers: { Accept: 'application/vnd.pypi.simple.v1+json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const text = await res.text();
+    let names = [];
+    try {
+      names = (JSON.parse(text).files || []).map((f) => f.filename);
+    } catch {
+      /* the pytorch.org index serves HTML regardless of Accept */
+    }
+    if (!names.length) {
+      // HTML simple index: wheel names appear in link hrefs with
+      // '+' percent-encoded as %2B — decode before matching.
+      names = text.replace(/%2B/gi, '+').match(/[A-Za-z0-9._+\-]+\.whl/g) || [];
+    }
+    return pickNewestTorchWheel(names, blender.version);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The pip script run INSIDE Blender for Microsoft Store installs.
  * The Store package folder is protected, so the app cannot spawn
  * the package's python.exe directly — but Blender itself can run
  * its own Python via subprocess, inside its own package context.
  */
-function storeInstallScript(modulesDir) {
+function storeInstallScript(modulesDir, upgrade = false) {
   return [
     'import subprocess, sys',
     'def run(args):',
@@ -412,7 +482,7 @@ function storeInstallScript(modulesDir) {
     "    run([sys.executable, '-m', 'ensurepip', '--default-pip'])",
     'except Exception as e:',
     "    print('ensurepip skipped:', e, flush=True)",
-    `run([sys.executable, '-m', 'pip', 'install', '--target', ${JSON.stringify(modulesDir)}, 'torch', '--index-url', ${JSON.stringify(TORCH_INDEX)}])`,
+    `run([sys.executable, '-m', 'pip', 'install', '--target', ${JSON.stringify(modulesDir)}, ${upgrade ? "'--upgrade', " : ''}'torch', '--index-url', ${JSON.stringify(TORCH_INDEX)}])`,
     "print('TORCH_INSTALL_OK', flush=True)",
     '',
   ].join('\n');
@@ -472,18 +542,19 @@ function torchCompiledPresent(modulesDir) {
  * is deliberately not installed — Blender bundles its own, and
  * torch's remaining small dependencies come in the second step.
  */
-async function installTorchForeign(blender, installerPython, { onLog = () => {}, registerChild } = {}) {
+async function installTorchForeign(blender, installerPython, { onLog = () => {}, registerChild, upgrade = false } = {}) {
   const base = foreignPipBase(blender.modulesDir, blender.version);
+  const up = upgrade ? ['--upgrade'] : [];
   onLog(
     `Fetching torch for Blender's Python ${blenderPythonFor(blender.version)} using ${installerPython} — the Store package itself is never launched…`
   );
-  await runStreaming(installerPython, [...base, '--no-deps', 'torch', '--index-url', TORCH_INDEX], {
+  await runStreaming(installerPython, [...base, ...up, '--no-deps', 'torch', '--index-url', TORCH_INDEX], {
     onLog,
     registerChild,
   });
   await runStreaming(
     installerPython,
-    [...base, 'filelock', 'typing-extensions', 'sympy', 'networkx', 'jinja2', 'fsspec', 'MarkupSafe'],
+    [...base, ...up, 'filelock', 'typing-extensions', 'sympy', 'networkx', 'jinja2', 'fsspec', 'MarkupSafe'],
     { onLog, registerChild }
   );
   if (!torchCompiledPresent(blender.modulesDir)) {
@@ -499,16 +570,16 @@ async function installTorchForeign(blender, installerPython, { onLog = () => {},
  * Python (opts.installerPython) and only fall back to running pip
  * through Blender itself when no installer Python is available.
  */
-async function installTorch(blender, { onLog = () => {}, registerChild, installerPython } = {}) {
+async function installTorch(blender, { onLog = () => {}, registerChild, installerPython, upgrade = false } = {}) {
   fs.mkdirSync(blender.modulesDir, { recursive: true });
   if (blender.store && installerPython) {
-    await installTorchForeign(blender, installerPython, { onLog, registerChild });
+    await installTorchForeign(blender, installerPython, { onLog, registerChild, upgrade });
     return;
   }
   if (blender.store) {
     if (!blender.exe) throw new Error('Store install has no launchable blender.exe');
     onLog(`Launching Blender: ${blender.exe}`);
-    const scriptPath = tempPyFile('hunyuan3d-torch-install.py', storeInstallScript(blender.modulesDir));
+    const scriptPath = tempPyFile('hunyuan3d-torch-install.py', storeInstallScript(blender.modulesDir, upgrade));
     let buf = '';
     const res = await runBlenderCapture(blender, ['--background', '--python', scriptPath], {
       timeoutMs: 900000,
@@ -535,7 +606,11 @@ async function installTorch(blender, { onLog = () => {}, registerChild, installe
   }
   await runStreaming(
     blender.python,
-    ['-m', 'pip', 'install', '--target', blender.modulesDir, 'torch', '--index-url', TORCH_INDEX],
+    [
+      '-m', 'pip', 'install', '--target', blender.modulesDir,
+      ...(upgrade ? ['--upgrade'] : []),
+      'torch', '--index-url', TORCH_INDEX,
+    ],
     { onLog, registerChild }
   );
 }
@@ -864,6 +939,9 @@ module.exports = {
   installTorchForeign,
   torchDllPath,
   probeDll,
+  installedTorchVersion,
+  pickNewestTorchWheel,
+  fetchNewestTorchVersion,
   TORCH_SHIM_SRC,
   torchShimPath,
   startupScriptSource,

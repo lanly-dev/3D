@@ -1627,7 +1627,41 @@ async function runBlenderPrep() {
     checkCancel();
 
     if (blenderprep.torchInModules(target)) {
-      log('torch is already in the modules folder — skipping the install.');
+      // Already installed: keep it at the newest release (Lan's ask,
+      // 2026-10-25). Ask the CPU index what the newest wheel for
+      // this Blender's Python is; upgrade only when it is actually
+      // newer, and never let a failed upgrade kill the prep — the
+      // existing torch stays usable either way.
+      const current = blenderprep.installedTorchVersion(target);
+      log(
+        `torch ${current || '(unknown version)'} is already in the modules folder — checking for a newer release…`
+      );
+      const newest = await blenderprep.fetchNewestTorchVersion(target);
+      checkCancel();
+      if (newest && current && blenderprep.compareVersions(newest, current) > 0) {
+        prepState({ phase: 'running', label: `Upgrading torch to ${newest}…` });
+        log(`Newer torch available: ${newest} — upgrading (a few minutes, mostly downloading)…`);
+        try {
+          await blenderprep.installTorch(target, {
+            onLog: log,
+            registerChild,
+            installerPython,
+            upgrade: true,
+          });
+          log(`torch upgraded — now ${blenderprep.installedTorchVersion(target) || newest}.`);
+        } catch (err) {
+          log(
+            `torch upgrade failed (${err && err.message ? err.message : err}) — keeping the existing torch ${current}.`
+          );
+        }
+        checkCancel();
+      } else if (newest && current) {
+        log(`Already the newest torch for this Blender (${current}).`);
+      } else if (newest) {
+        log(`Could not read the installed torch version — leaving it as-is (newest available: ${newest}).`);
+      } else {
+        log('Could not check for a newer torch (offline?) — keeping the existing one.');
+      }
     } else {
       prepState({ phase: 'running', label: 'Installing CPU torch (~200 MB)…' });
       log('Installing CPU-only torch — a few minutes, mostly downloading…');

@@ -162,7 +162,10 @@ with the `blender.exe` app alias as a fallback, and each probe's
 result written to the window's log), adds CPU-only torch (~200 MB)
 to Blender's per-user
 modules folder (the Blender install itself is untouched, no admin
-needed), and verifies by having Blender import `bpy_lib` headless.
+needed); re-running the prep upgrades an older installed torch
+in place to the newest release the CPU index offers for that
+Blender's Python (a failed upgrade keeps the existing torch),
+and it verifies by having Blender import `bpy_lib` headless.
 For Store installs, Windows protects the package folder and blocks
 outside processes from launching its exe, so the install never
 launches Blender at all: the MeshCoder env's pip downloads torch
