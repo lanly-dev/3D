@@ -1603,6 +1603,44 @@ async function runBlenderPrep() {
     const verdict = await blenderprep.verifyBlender(target, home, { registerChild, onLog: log });
     if (!verdict.ok) {
       const detail = String(verdict.detail || '');
+      // torch found but its DLLs won't initialize inside Blender
+      // (WinError 1114 on c10.dll). Find out whether the DLL loads in
+      // a neutral process: yes → a conflict with a DLL Blender
+      // already loaded (classically a duplicate OpenMP runtime —
+      // fixable with KMP_DUPLICATE_LIB_OK); no → a system runtime
+      // is missing from the machine.
+      const probePython = installerPython || target.python;
+      if (/WinError 1114|DLL initialization/i.test(detail) && probePython) {
+        log('torch is installed, but its DLLs fail to initialize inside Blender. Probing c10.dll outside Blender…');
+        const probe = await blenderprep.probeDll(probePython, blenderprep.torchDllPath(target), {
+          registerChild,
+        });
+        if (probe.ok) {
+          log('c10.dll loads fine outside Blender — inside Blender it clashes with an already-loaded DLL (the classic duplicate OpenMP runtime).');
+          log('Setting the user environment variable KMP_DUPLICATE_LIB_OK=TRUE, which tells OpenMP to allow the duplicate…');
+          let setOk = false;
+          try {
+            const set = await blenderprep.runCapture('setx', ['KMP_DUPLICATE_LIB_OK', 'TRUE'], {
+              timeoutMs: 30000,
+              registerChild,
+            });
+            setOk = set.code === 0;
+          } catch {
+            setOk = false;
+          }
+          log(
+            setOk
+              ? 'Set. Fully quit Blender (all windows) and restart it, then run the generated script again.'
+              : 'Could not set it automatically — set the user environment variable KMP_DUPLICATE_LIB_OK to TRUE manually, then fully restart Blender.'
+          );
+          prepState({ phase: 'done', label: 'One more step: restart Blender' });
+          return { ok: true };
+        }
+        log('c10.dll fails outside Blender too — a system runtime it needs is missing, usually the Microsoft Visual C++ 2015–2022 Redistributable (x64).');
+        log('Install it from Microsoft (https://aka.ms/vs/17/release/vc_redist.x64.exe), then re-run Prepare Blender.');
+        prepState({ phase: 'error', label: 'Missing Visual C++ runtime' });
+        return { ok: false, message: 'Missing Visual C++ runtime' };
+      }
       // For a Store install, failing to LAUNCH Blender from here is
       // a known platform limit, not an install failure: if Blender
       // never produced a real error (no traceback in its output),

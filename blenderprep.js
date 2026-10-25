@@ -573,6 +573,36 @@ async function verifyBlender(blender, meshcoderHome, { registerChild, onLog = ()
   return { ok, mode, detail: tail };
 }
 
+/** The DLL whose init failure shows up as WinError 1114 on import. */
+function torchDllPath(blender) {
+  return path.join(blender.modulesDir, 'torch', 'lib', 'c10.dll');
+}
+
+/**
+ * Discriminator for WinError 1114: try loading c10.dll in a NEUTRAL
+ * process (any Python with ctypes — the DLL has no Python deps).
+ * Loads fine there → the failure is a conflict with something the
+ * Blender process already loaded (classically a second OpenMP
+ * runtime). Fails there too → a system runtime c10.dll needs is
+ * missing from the machine (usually the VC++ redistributable).
+ */
+async function probeDll(python, dllPath, { registerChild } = {}) {
+  const src = [
+    'import ctypes',
+    'try:',
+    `    ctypes.WinDLL(${JSON.stringify(dllPath)})`,
+    "    print('DLL_OK')",
+    'except OSError as e:',
+    "    print('DLL_FAIL', e)",
+  ].join('\n');
+  try {
+    const res = await runCapture(python, ['-c', src], { timeoutMs: 60000, registerChild });
+    return { ok: res.out.includes('DLL_OK'), out: res.out.trim() };
+  } catch (err) {
+    return { ok: false, out: String(err && err.message ? err.message : err) };
+  }
+}
+
 module.exports = {
   TORCH_INDEX,
   findBlenders,
@@ -585,6 +615,8 @@ module.exports = {
   foreignPipBase,
   torchCompiledPresent,
   installTorchForeign,
+  torchDllPath,
+  probeDll,
   storeEntries,
   storeInstallScript,
   defaultRoots,

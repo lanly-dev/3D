@@ -146,7 +146,12 @@ wheels built for Blender's own Python version (foreign-target
 install) into the modules folder. Verification still tries to
 launch Blender headless (with shell and PowerShell Start-Process
 fallbacks); if Store activation prevents even that, the prep
-reports "installed — verify in Blender" instead of failing.
+reports "installed — verify in Blender" instead of failing. If
+torch is found but its DLLs fail to initialize inside Blender
+(WinError 1114), the prep probes `c10.dll` in a neutral process to
+tell a DLL conflict (it sets `KMP_DUPLICATE_LIB_OK=TRUE` for the
+classic duplicate-OpenMP clash; restart Blender afterwards) from a
+missing Visual C++ runtime (it points at the installer).
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a
