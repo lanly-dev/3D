@@ -334,7 +334,7 @@ function run(cmd, args, opts = {}) {
  * active workspace so generated code lands in the project folder).
  */
 async function convertToCode(meshPath, outDir, opts = {}) {
-  const { onLog, onPhase, registerChild, onSyntaxIssue, onAutoFix } = opts;
+  const { onLog, onPhase, registerChild, onSyntaxIssue } = opts;
   // With a log sink, stream the child's output live; without one, buffer it.
   const exec = onLog ? (cmd, args, runOpts) => runStreaming(cmd, args, { onLog, registerChild, ...runOpts }) : run;
   let cfg = loadConfig();
@@ -406,19 +406,15 @@ async function convertToCode(meshPath, outDir, opts = {}) {
 
     // 3. MeshCoder's output is model-generated code and is not
     // guaranteed to be valid Python (a merged create_curve call with
-    // mismatched brackets shipped once). Parse it now, try to repair
-    // it automatically, and flag whatever survives — at conversion
-    // time, not inside Blender later. None of this fails the
-    // conversion: the file is still the model's output.
+    // mismatched brackets shipped once). Parse it now and flag a bad
+    // line — at conversion time, not inside Blender later. The file
+    // itself is never modified here; a flagged file can be re-checked
+    // after a hand fix via the asset row's Verify menu item. A syntax
+    // issue does not fail the conversion.
     const issue = await checkSyntax(cfg.python, codePath);
     if (issue) {
       if (onLog) onLog(`Syntax check: line ${issue.line} — ${issue.message}`);
-      const fix = await autoFixGeneratedCode(cfg.python, codePath, issue, runInference, onLog);
-      if (fix) {
-        if (onAutoFix) onAutoFix(fix);
-      } else if (onSyntaxIssue) {
-        onSyntaxIssue(issue);
-      }
+      if (onSyntaxIssue) onSyntaxIssue(issue);
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -426,166 +422,6 @@ async function convertToCode(meshPath, outDir, opts = {}) {
   return codePath;
 }
 
-/**
- * Try to make a generated script with a syntax error parse cleanly,
- * in escalating order:
- *   1. Bracket repair — end-of-line only (append missing closers,
- *      strip excess trailing closers), accepted only if the whole
- *      file then parses. Mid-line regrouping is never attempted:
- *      it can parse while silently changing what the code means.
- *   2. One regeneration with sampling on — greedy decoding would
- *      reproduce the identical broken file, sampling produces
- *      different code that often parses. Accepted only if it parses;
- *      otherwise the first-pass file is restored.
- * Before either step touches the file, the first-pass original is
- * copied to `<code>.orig`. Resolves with a fix descriptor
- * ({ kind: 'brackets', line } | { kind: 'regenerated' }) or null.
- */
-async function autoFixGeneratedCode(python, codePath, issue, runInference, onLog) {
-  const log = onLog || (() => {});
-  const backupPath = `${codePath}.orig`;
-  const backup = () => {
-    try {
-      fs.copyFileSync(codePath, backupPath);
-    } catch {
-      /* backup is best effort — a failed copy must not block the fix */
-    }
-  };
-
-  const repaired = await tryBracketRepair(python, codePath, issue);
-  if (repaired) {
-    backup();
-    try {
-      fs.writeFileSync(codePath, repaired.text);
-      log(`Auto-fix: balanced the brackets on line ${repaired.line} — the file now parses.`);
-      return { kind: 'brackets', line: repaired.line };
-    } catch {
-      /* fall through to regeneration */
-    }
-  }
-
-  try {
-    backup();
-    log('Auto-fix: regenerating once with sampling on…');
-    await runInference(codePath, true);
-    if (fs.existsSync(codePath) && (await checkSyntax(python, codePath)) === null) {
-      log('Auto-fix: the regenerated file parses cleanly.');
-      return { kind: 'regenerated' };
-    }
-  } catch {
-    /* a failed retry restores the original below */
-  }
-  try {
-    if (fs.existsSync(backupPath)) fs.copyFileSync(backupPath, codePath);
-  } catch {
-    /* keep whatever is on disk */
-  }
-  log('Auto-fix: could not repair the file automatically.');
-  return null;
-}
-
-const OPEN_TO_CLOSE = { '(': ')', '[': ']', '{': '}' };
-const CLOSE_TO_OPEN = { ')': '(', ']': '[', '}': '{' };
-
-/**
- * Scan one line's bracket stack, ignoring brackets inside string
- * literals and anything after a top-level '#'. `unterminated` marks
- * a string that never closes (not a bracket problem — no candidates).
- */
-function scanBrackets(line) {
-  const stack = [];
-  let quote = null;
-  let escaped = false;
-  let mismatch = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (ch === '\\') escaped = true;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-    } else if (ch === '#') {
-      return { stack, commentAt: i, unterminated: false, mismatch };
-    } else if (OPEN_TO_CLOSE[ch]) {
-      stack.push(ch);
-    } else if (CLOSE_TO_OPEN[ch]) {
-      if (stack.length && stack[stack.length - 1] === CLOSE_TO_OPEN[ch]) stack.pop();
-      else mismatch = true; // left in place: repair is end-of-line only
-    }
-  }
-  return { stack, commentAt: -1, unterminated: Boolean(quote), mismatch };
-}
-
-/**
- * Candidate repairs for one line, confined to the line's trailing
- * run of closers: append whatever the line leaves open, delete one
- * closer from the run, or insert one closer into it (each then
- * completed with any still-missing closers). Mid-line brackets are
- * never touched — regrouping arguments can parse while silently
- * changing what the code means. Every candidate is validated by
- * parsing the whole file before it is accepted. Returns [] for
- * string errors and clean lines.
- */
-function bracketRepairCandidates(line) {
-  const scan = scanBrackets(line);
-  if (scan.unterminated) return [];
-  if (!scan.stack.length && !scan.mismatch) return []; // balanced — nothing to repair
-  const codeEnd = scan.commentAt >= 0 ? scan.commentAt : line.length;
-  const code = line.slice(0, codeEnd).replace(/\s+$/, '');
-  const suffix = scan.commentAt >= 0 ? ` ${line.slice(scan.commentAt)}` : '';
-  const out = [];
-  const push = (s) => {
-    if (s && s !== code && !out.includes(s)) out.push(s + suffix);
-  };
-  const withMissing = (s) => {
-    const sc = scanBrackets(s);
-    if (sc.unterminated) return s;
-    return s + sc.stack.slice().reverse().map((o) => OPEN_TO_CLOSE[o]).join('');
-  };
-
-  push(withMissing(code));
-  let runStart = code.length;
-  while (runStart > 0 && CLOSE_TO_OPEN[code[runStart - 1]]) runStart -= 1;
-  if (runStart < code.length) {
-    for (let i = runStart; i < code.length; i += 1) {
-      push(withMissing(code.slice(0, i) + code.slice(i + 1))); // delete one closer
-      for (const c of [']', ')', '}']) {
-        push(withMissing(code.slice(0, i) + c + code.slice(i))); // insert one closer
-      }
-    }
-  }
-  return out.slice(0, 16);
-}
-
-/**
- * Try the bracket-repair candidates for the flagged line against the
- * WHOLE file: a candidate wins only when the full file parses with
- * it. Resolves with { line, text } (the repaired file content) or
- * null. Writes nothing.
- */
-async function tryBracketRepair(python, codePath, issue) {
-  let text;
-  try {
-    text = fs.readFileSync(codePath, 'utf8');
-  } catch {
-    return null;
-  }
-  const lines = text.split('\n');
-  const idx = (issue.line || 0) - 1;
-  if (idx < 0 || idx >= lines.length) return null;
-  for (const candidate of bracketRepairCandidates(lines[idx])) {
-    const trial = lines.slice();
-    trial[idx] = candidate;
-    const joined = trial.join('\n');
-    if ((await parseSource(python, joined)) === null) {
-      return { line: issue.line, text: joined };
-    }
-  }
-  return null;
-}
 
 const SYNTAX_CHECK_SRC = [
   'import ast, sys',
@@ -1025,4 +861,4 @@ async function verifyEnv(home, { onLog = () => {}, registerChild } = {}) {
   return { cuda };
 }
 
-module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, bracketRepairCandidates, tryBracketRepair, autoFixGeneratedCode, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };
+module.exports = { loadConfig, saveConfig, isConfigured, convertToCode, checkSyntax, parseSource, configPath, detect, detectAndSave, findHome, findPython, downloadDest, cloneRepo, REPO_URL, envDir, envPython, checkpointsPresent, checkpointPlan, findBasePython310, installPython310, createEnv, installSteps, runStreaming, downloadCheckpoints, verifyEnv, sitePackagesDir, installShims, refreshShimsIfManaged, HF_REPO };

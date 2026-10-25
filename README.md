@@ -24,9 +24,11 @@ A small desktop wrapper around the Hunyuan3D web app
   filters, per-asset actions, and a workspace scope. Double-click a name
   to rename the file in place (a model's companion script is renamed
   along with it); clicking the status line copies its message; right-click
-  a row for **Show in Explorer**, **Delete file** (moves it to the Recycle
-  Bin, with confirmation), or **Remove from list**. **F12** toggles
-  DevTools on the focused view.
+  a row for **Show in Explorer**, **Verify** (generated Python scripts
+  only: re-runs the syntax check and reports the verdict on the status
+  line), **Delete file** (moves it to the Recycle Bin, with
+  confirmation), or **Remove from list**. **F12** toggles DevTools on
+  the focused view.
 - **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
   instead of the machine's default app: orbit / zoom / pan, wireframe,
   auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY
@@ -119,12 +121,11 @@ torch + trimesh and save them to the config.
 Then use **Tools → Convert last download to Blender code**, or the **To
 Blender** button on a mesh row. After each conversion the app parses
 the generated script — MeshCoder's output is model-generated and
-occasionally contains a malformed line that Blender would reject.
-Bracket slips at the end of a line are repaired automatically, and
-if that fails the code is regenerated once with sampling on; the
-model's original output is kept as `<name>.blender.py.orig` either
-way. A syntax error that survives both attempts is flagged (with its
-line) in the status bar.
+occasionally contains a malformed line that Blender would reject —
+and flags a bad line (with its number) in the status bar; the file
+itself is never modified. After hand-fixing a line, right-click the
+script's row and choose **Verify** to re-run the same check on
+demand.
 
 MeshCoder was trained on human-made objects, so AI-generated meshes are
 out-of-distribution — expect approximate results, and convert one part at a

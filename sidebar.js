@@ -27,9 +27,6 @@ function icon(paths) {
   );
 }
 const ICONS = {
-  reveal:
-    '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9l-.81-1.2A2 2 0 0 0 8.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>' +
-    '<path d="M2 10h20"/>',
   open:
     '<path d="M15 3h6v6"/><path d="M10 14 21 3"/>' +
     '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
@@ -276,14 +273,6 @@ function renderList() {
       openMoveMenu(move, a);
     });
 
-    const reveal = document.createElement('button');
-    reveal.className = 'btn icon-btn';
-    reveal.innerHTML = icon(ICONS.reveal);
-    reveal.title = 'Show this file in Explorer';
-    reveal.addEventListener('click', (e) => {
-      e.stopPropagation();
-      bridge.reveal(a.filePath).then((ok) => setStatus(ok ? 'Revealed' : 'File not found'));
-    });
     const open = document.createElement('button');
     open.className = 'btn icon-btn';
     open.innerHTML = icon(ICONS.open);
@@ -311,7 +300,7 @@ function renderList() {
         setStatus('Viewer failed: ' + (err && err.message ? err.message : err));
       });
     });
-    actions.append(reveal, open, move);
+    actions.append(open, move);
 
     if (a.kind === 'model') {
       const conv = document.createElement('button');

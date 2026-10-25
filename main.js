@@ -77,7 +77,7 @@ let converting = false;
 /* the status line and the whole log is written to userData.          */
 /* ------------------------------------------------------------------ */
 
-const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null, autoFix: null };
+const conversionUi = { file: '', phase: '', startedAt: 0, timer: null, lines: [], syntaxIssue: null };
 
 function pushSidebarStatus(text) {
   if (sidebarView && !sidebarView.webContents.isDestroyed()) {
@@ -111,20 +111,7 @@ function conversionProgressOpts() {
     onSyntaxIssue: (issue) => {
       conversionUi.syntaxIssue = issue;
     },
-    onAutoFix: (fix) => {
-      conversionUi.autoFix = fix;
-    },
   };
-}
-
-/** One-line description of an automatic syntax repair, for status text. */
-function autoFixNote(codePath) {
-  const fix = conversionUi.autoFix;
-  if (!fix) return '';
-  const orig = `${path.basename(codePath)}.orig`;
-  return fix.kind === 'brackets'
-    ? `Auto-fixed a bracket slip on line ${fix.line}; the model's original is kept as ${orig}.`
-    : `The first pass had a syntax error, so the code was regenerated once with sampling on; the model's original is kept as ${orig}.`;
 }
 
 function startConversionUi(filePath) {
@@ -133,7 +120,6 @@ function startConversionUi(filePath) {
   conversionUi.startedAt = Date.now();
   conversionUi.lines = [];
   conversionUi.syntaxIssue = null;
-  conversionUi.autoFix = null;
   pushSidebarStatus(conversionStatusText());
   clearInterval(conversionUi.timer);
   conversionUi.timer = setInterval(() => {
@@ -1123,15 +1109,12 @@ async function convertLastDownload() {
     compounding.harvest(codePath, path.basename(lastDownloadPath));
     notifySidebar();
     new Notification({ title: 'Hunyuan3D', body: `Blender code saved: ${path.basename(codePath)}` }).show();
-    if (conversionUi.autoFix) {
-      pushSidebarStatus(`Saved ${path.basename(codePath)} — ${autoFixNote(codePath)}`);
-    } else if (conversionUi.syntaxIssue) {
+    if (conversionUi.syntaxIssue) {
       const si = conversionUi.syntaxIssue;
       pushSidebarStatus(
         `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed (click to copy)${si.text ? `\n${si.text}` : ''}`
       );
     }
-    shell.showItemInFolder(codePath);
   } catch (err) {
     const report = conversionFailureReport(err);
     pushSidebarStatus(`MeshCoder failed (${conversionUi.file}) — click to copy the traceback\n${report.excerpt}`);
@@ -1191,6 +1174,28 @@ async function openMeshcoderConfig() {
     );
   }
   await shell.openPath(file);
+}
+
+/**
+ * Syntax-check one generated script on demand (the asset row's Verify
+ * menu item) and describe the verdict for the status line: parses
+ * cleanly, or the first bad line — the same check that runs after a
+ * conversion, re-runnable after a hand fix. Uses the MeshCoder env's
+ * python (configured, or auto-detected).
+ */
+async function verifyAssetFile(id) {
+  const found = assets.find(String(id || ''));
+  if (!found) return 'Asset not found';
+  const name = path.basename(found.filePath);
+  if (!fs.existsSync(found.filePath)) return `Verify: ${name} — file not found on disk`;
+  let python = meshcoder.loadConfig().python;
+  if (!python || !fs.existsSync(python)) python = meshcoder.detect().python;
+  if (!python || !fs.existsSync(python)) {
+    return 'Verify needs the MeshCoder Python env — run Tools → Set up MeshCoder automatically… (or Detect) first.';
+  }
+  const issue = await meshcoder.checkSyntax(python, found.filePath);
+  if (!issue) return `Verify: ${name} — parses cleanly. Blender can run it.`;
+  return `Verify: ${name} — ⚠ syntax error at line ${issue.line}: ${issue.message}${issue.text ? `\n${issue.text}` : ''}`;
 }
 
 /**
@@ -1722,8 +1727,21 @@ function registerIpc() {
   ipcMain.handle('assets:contextMenu', (_e, id) => {
     const found = assets.find(String(id || ''));
     if (!found) return false;
-    const menu = Menu.buildFromTemplate([
+    const items = [
       { label: 'Show in Explorer', click: () => shell.showItemInFolder(found.filePath) },
+    ];
+    // Generated Python gets an on-demand syntax check (Verify) — the
+    // same parse that runs after a conversion, re-runnable after a
+    // hand fix. The verdict lands on the sidebar status line.
+    if (/\.py$/i.test(found.filePath || '')) {
+      items.push({
+        label: 'Verify',
+        click: () => {
+          verifyAssetFile(found.id).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
+      });
+    }
+    items.push(
       { type: 'separator' },
       { label: 'Delete file', click: () => deleteAssetFile(found.id) },
       {
@@ -1733,11 +1751,13 @@ function registerIpc() {
           thumbs.remove(found.id);
           notifySidebar();
         },
-      },
-    ]);
+      }
+    );
+    const menu = Menu.buildFromTemplate(items);
     menu.popup({ window: mainWindow });
     return true;
   });
+  ipcMain.handle('assets:verify', async (_e, id) => ({ message: await verifyAssetFile(id) }));
   ipcMain.handle('setup:start', (_e, token) => runSetup(String(token || '').trim()));
   ipcMain.handle('setup:cancel', () => {
     setupCancelled = true;
@@ -1825,14 +1845,11 @@ function registerIpc() {
         title: 'Hunyuan3D',
         body: `Blender code saved: ${path.basename(codePath)}`,
       }).show();
-      shell.showItemInFolder(codePath);
       const si = conversionUi.syntaxIssue;
       return {
-        message: conversionUi.autoFix
-          ? `Saved ${path.basename(codePath)} — ${autoFixNote(codePath)}`
-          : si
-            ? `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed${si.text ? `\n${si.text}` : ''}`
-            : `Saved ${path.basename(codePath)}`,
+        message: si
+          ? `Saved ${path.basename(codePath)} — ⚠ syntax error at line ${si.line}: ${si.message} — Blender can't run it until that line is fixed${si.text ? `\n${si.text}` : ''}`
+          : `Saved ${path.basename(codePath)}`,
       };
     } catch (err) {
       const detail = String(err && err.message ? err.message : err);
