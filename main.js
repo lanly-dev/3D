@@ -1084,18 +1084,6 @@ function focusedWebContents() {
   return w ? w.webContents : null;
 }
 
-/** F12: toggle DevTools on whichever view or window currently has focus. */
-function toggleDevTools() {
-  const wc = webContents.getFocusedWebContents();
-  // If DevTools itself has focus, fall through to the site view instead of
-  // trying to open DevTools for DevTools.
-  if (wc && !wc.isDestroyed() && !wc.getURL().startsWith('devtools://')) {
-    wc.toggleDevTools();
-    return;
-  }
-  if (siteView && !siteView.webContents.isDestroyed()) siteView.webContents.toggleDevTools();
-}
-
 async function convertLastDownload() {
   const win = focusedWindow();
   if (converting) {
@@ -1899,7 +1887,6 @@ function buildMenu() {
           checked: Boolean(settings.translateToEnglish),
           click: () => toggleTranslate(),
         },
-        { label: 'Toggle Developer Tools', accelerator: 'F12', click: () => toggleDevTools() },
         { type: 'separator' },
         {
           label: 'Clear session && restart',

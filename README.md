@@ -33,8 +33,8 @@ A small desktop wrapper around the Hunyuan3D web app
   merged onto one line, a truncated tail — keeping a `<file>.orig`
   backup; a repair is written only when the result parses), **Delete file**
   (moves it to the Recycle Bin, with
-  confirmation), or **Remove from list**. **F12** toggles DevTools on
-  the focused view.
+  confirmation), or **Remove from list**. **Toggle DevTools** (Navigate
+  menu, Ctrl+Shift+I) toggles DevTools on the focused view.
 - **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
   instead of the machine's default app: orbit / zoom / pan, wireframe,
   auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY
