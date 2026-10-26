@@ -2121,6 +2121,13 @@ function registerIpc() {
 
   ipcMain.handle('assets:list', (_e, workspaceId) => {
     const list = assets.list(workspaceId || null);
+    // Mirror the assets:view routing so the sidebar can label its Open
+    // button truthfully: models and converted code files open in the
+    // in-app viewer, everything else in the default app.
+    for (const a of list) {
+      const ext = path.extname(a.filePath || '').toLowerCase();
+      a.viewer = a.kind === 'model' || assets.MODEL_EXTS.includes(ext) || isConvertedCodeFile(a.filePath);
+    }
     for (const a of list) {
       if (a.kind !== 'model' || !a.exists) continue;
       const meta = thumbs.get(a.id);
@@ -2172,9 +2179,14 @@ function registerIpc() {
   ipcMain.handle('assets:contextMenu', (_e, id) => {
     const found = assets.find(String(id || ''));
     if (!found) return false;
-    const items = [
+    const items = [];
+    const viewExt = path.extname(found.filePath || '').toLowerCase();
+    if (found.kind === 'model' || assets.MODEL_EXTS.includes(viewExt) || isConvertedCodeFile(found.filePath)) {
+      items.push({ label: 'Open in viewer', click: () => openViewer(found.filePath) });
+    }
+    items.push(
       { label: 'Show in Explorer', click: () => shell.showItemInFolder(found.filePath) },
-    ];
+    );
     // Generated Python gets an on-demand syntax check + repair
     // (Verify and fix) — the same parse that runs after a
     // conversion, plus a parse-gated formatting repair when it

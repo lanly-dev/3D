@@ -24,7 +24,8 @@ A small desktop wrapper around the Hunyuan3D web app
   filters, per-asset actions, and a workspace scope. Double-click a name
   to rename the file in place (a model's companion script is renamed
   along with it); clicking the status line copies its message; right-click
-  a row for **Show in Explorer**, **Verify and fix** (generated Python
+  a row for **Open in viewer** (models and converted code files),
+  **Show in Explorer**, **Verify and fix** (generated Python
   scripts only: re-runs the syntax check and repairs the formatting
   failures this generator produces — two curve loops fused into one
   `create_curve` call (split back into per-loop calls; this one is

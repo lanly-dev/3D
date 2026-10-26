@@ -241,16 +241,19 @@ function renderList() {
     const open = document.createElement('button');
     open.className = 'btn icon-btn';
     open.innerHTML = icon(ICONS.open);
-    // Same rule as the main process: a model extension opens in the viewer
-    // even if the stored kind is stale.
-    const isModel = a.kind === 'model' || /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(a.filePath || '');
+    // The main process marks each asset with `viewer` when opening it
+    // routes to the in-app viewer (models, and converted code files whose
+    // header it checked). Fall back to the extension rule when the flag
+    // is absent (an older main process).
+    const isModel = typeof a.viewer === 'boolean' ? a.viewer
+      : a.kind === 'model' || /\.(glb|gltf|obj|fbx|stl|ply)$/i.test(a.filePath || '');
     open.title = isModel ? 'View in the in-app 3D viewer' : 'Open this file with its default app';
     open.addEventListener('click', (e) => {
       e.stopPropagation();
       // Report synchronously, before any IPC: if even this never shows,
       // the click is not reaching this listener at all (stale renderer,
       // frozen sidebar), which is a different problem from the viewer.
-      setStatus('Opening viewer…');
+      setStatus(isModel ? 'Opening viewer…' : 'Opening…');
       if (typeof bridge.view !== 'function') {
         setStatus('Viewer unavailable — restart the app to load the new sidebar');
         return;
