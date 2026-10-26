@@ -1083,6 +1083,54 @@ function focusedWebContents() {
   return w ? w.webContents : null;
 }
 
+// --- Three.js code conversion (glb2ts) -------------------------------------
+// Vendored from the glb2ts project: converts a model file into a
+// self-contained TypeScript module that rebuilds it with Three.js at
+// runtime — geometry, materials, node tree, and textures (embedded as
+// data). Pure CPU, no setup; GLB/GLTF/OBJ/STL/PLY.
+let glb2tsModule = null;
+async function loadGlb2ts() {
+  if (!glb2tsModule) {
+    glb2tsModule = await import(url.pathToFileURL(path.join(__dirname, 'glb2ts.mjs')).href);
+  }
+  return glb2tsModule;
+}
+
+/** Convert one model file to <name>.ts next to it; returns a status message. */
+async function convertFileToTs(filePath) {
+  const name = path.basename(filePath);
+  if (!fs.existsSync(filePath)) return `Convert to Three.js code: ${name} — file not found on disk`;
+  try {
+    const { convertToTs } = await loadGlb2ts();
+    const res = convertToTs(filePath);
+    const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + '.ts');
+    fs.writeFileSync(outPath, res.code);
+    assets.track(outPath);
+    notifySidebar();
+    const s = res.stats;
+    const texNote = s.textures ? `, ${s.textures} texture${s.textures === 1 ? '' : 's'} embedded` : '';
+    const warnNote = res.warnings.length ? ` — ${res.warnings.length} warning(s): ${res.warnings[0]}` : '';
+    return `Saved ${path.basename(outPath)} — ${s.parts} part(s)${texNote}${warnNote}`;
+  } catch (err) {
+    return `Convert to Three.js code failed (${name}): ${String(err && err.message ? err.message : err)}`;
+  }
+}
+
+async function convertLastDownloadToTs() {
+  const win = focusedWindow();
+  if (!lastDownloadPath || !fs.existsSync(lastDownloadPath)) {
+    await dialog.showMessageBox(win, {
+      type: 'info',
+      message: 'Nothing to convert yet',
+      detail: 'Generate and download a model first — this converts the most recent download.',
+    });
+    return;
+  }
+  const msg = await convertFileToTs(lastDownloadPath);
+  pushSidebarStatus(msg);
+  new Notification({ title: 'Hunyuan3D', body: msg }).show();
+}
+
 async function convertLastDownload() {
   const win = focusedWindow();
   if (converting) {
@@ -1991,6 +2039,10 @@ function buildMenu() {
           label: 'Convert last download to Blender code (MeshCoder)',
           click: () => convertLastDownload(),
         },
+        {
+          label: 'Convert last download to Three.js code',
+          click: () => convertLastDownloadToTs(),
+        },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
@@ -2088,6 +2140,16 @@ function registerIpc() {
         label: 'Verify and fix',
         click: () => {
           verifyAssetFile(found.id).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
+      });
+    }
+    // Models can also become runtime code: a self-contained .ts module
+    // that rebuilds the model with Three.js (textures embedded).
+    if (found.kind === 'model') {
+      items.push({
+        label: 'Convert to Three.js code',
+        click: () => {
+          convertFileToTs(found.filePath).then((msg) => pushSidebarStatus(msg)).catch(() => {});
         },
       });
     }

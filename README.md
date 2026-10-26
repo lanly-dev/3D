@@ -43,6 +43,12 @@ A small desktop wrapper around the Hunyuan3D web app
   generated in the background on first sight.
 - **MeshCoder** (optional) — converts a mesh into part-segmented, editable
   Blender Python code using a local MeshCoder install.
+- **Three.js code export** — converts any tracked model into a
+  self-contained TypeScript module that rebuilds it with Three.js at
+  runtime (geometry, materials, node tree, textures embedded). No AI and
+  no approximation: the model's own numbers, as code. *Tools → Convert
+  last download to Three.js code*, or right-click a model → **Convert to
+  Three.js code**; the `.ts` lands next to the model.
 
 It does not automate the site — no page scripting, no auto-clicking.
 

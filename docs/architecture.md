@@ -21,6 +21,7 @@ MeshCoder to turn meshes into editable Blender Python code.
 | `assets.js` | Tracked asset index (models, scripts, workspaces) |
 | `workspaces.js` | Named project folders + active workspace |
 | `meshcoder.js` | Calls MeshCoder inference on a mesh |
+| `glb2ts.mjs` | Model → self-contained TypeScript module (Three.js runtime rebuild, textures embedded) |
 | `mesh-to-npz.py` | Samples a mesh into a point cloud for MeshCoder |
 | `sidebar.html` / `sidebar.js` / `sidebar-preload.js` / `sidebar.css` | Left asset sidebar UI |
 | `package.json` | Scripts: `npm start`, `npm run package-win` |
