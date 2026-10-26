@@ -6,7 +6,10 @@
          If the import map below changes, recompute it (sha256 of the exact
          text between <script type="importmap"> and </script>) and update
          the hash here. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self' 'sha256-mpAYHjxf9UQwzjPXl6zDbUDmmDa2rewAQLxARrr8Slo=';" />
+    <!-- img-src/connect-src must allow blob: and data: — three.js fetches a
+         model's embedded textures from blob: URLs, and default-src 'none'
+         would silently strip every texture. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self' 'sha256-mpAYHjxf9UQwzjPXl6zDbUDmmDa2rewAQLxARrr8Slo='; img-src 'self' blob: data:; connect-src 'self' blob: data:;" />
     <title>3D Viewer</title>
     <link rel="stylesheet" href="viewer.css" />
     <script type="importmap">

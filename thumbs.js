@@ -6,7 +6,11 @@
  * asset id — not by file path — means a rename or workspace move keeps
  * the thumbnail. thumbs.json records the file mtime each thumbnail was
  * rendered from, so a changed file re-renders and a failed render is not
- * retried until the file changes again.
+ * retried until the file changes again. Each entry also records the
+ * renderer version: bump RENDER_VERSION whenever the render path changes
+ * in a way that makes older thumbnails wrong (v2: the thumb page's CSP
+ * blocked embedded textures, so every textured model rendered grey) and
+ * stale entries are re-rendered once.
  */
 const { app } = require('electron');
 const fs = require('fs');
@@ -34,6 +38,8 @@ function writeMeta(meta) {
   fs.writeFileSync(metaPath(), JSON.stringify(meta, null, 2));
 }
 
+const RENDER_VERSION = 2;
+
 function thumbPath(id) {
   return path.join(dir(), `${String(id)}.png`);
 }
@@ -44,13 +50,13 @@ function get(id) {
 
 function set(id, mtimeMs) {
   const meta = readMeta();
-  meta[String(id)] = { mtimeMs };
+  meta[String(id)] = { mtimeMs, v: RENDER_VERSION };
   writeMeta(meta);
 }
 
 function markFailed(id, mtimeMs) {
   const meta = readMeta();
-  meta[String(id)] = { mtimeMs, failed: true };
+  meta[String(id)] = { mtimeMs, failed: true, v: RENDER_VERSION };
   writeMeta(meta);
 }
 
@@ -63,4 +69,4 @@ function remove(id) {
   } catch { /* already gone */ }
 }
 
-module.exports = { dir, thumbPath, get, set, markFailed, remove };
+module.exports = { dir, thumbPath, get, set, markFailed, remove, RENDER_VERSION };

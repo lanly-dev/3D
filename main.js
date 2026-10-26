@@ -2029,10 +2029,13 @@ function registerIpc() {
       if (a.kind !== 'model' || !a.exists) continue;
       const meta = thumbs.get(a.id);
       const pngExists = fs.existsSync(thumbs.thumbPath(a.id));
-      const fresh = meta && !meta.failed && meta.mtimeMs === a.updatedAt && pngExists;
+      // Entries from an older renderer version count as stale even when
+      // the file itself has not changed (see thumbs.RENDER_VERSION).
+      const current = meta && meta.v === thumbs.RENDER_VERSION;
+      const fresh = current && !meta.failed && meta.mtimeMs === a.updatedAt && pngExists;
       if (fresh) {
         a.thumb = url.pathToFileURL(thumbs.thumbPath(a.id)).href;
-      } else if (!meta || !meta.failed || meta.mtimeMs !== a.updatedAt) {
+      } else if (!current || !meta.failed || meta.mtimeMs !== a.updatedAt) {
         // Missing, stale, or deleted PNG — but a render that failed for
         // this exact file version is not retried until the file changes.
         queueThumb(a);
