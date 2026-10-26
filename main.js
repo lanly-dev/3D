@@ -1100,7 +1100,8 @@ async function loadGlb2ts() {
  * Convert one model file to <name>.ts next to it — <name>.simple.ts when
  * opts.simplify keeps only a fraction of the triangles, <name>.small.ts
  * when opts.textureSize caps the embedded textures, <name>.smallest.ts
- * when both apply; returns a status message.
+ * when both apply, <name>.tiny.ts when opts.jpegTextures re-encodes the
+ * color textures as JPEG; returns a status message.
  */
 async function convertFileToTs(filePath, opts = {}) {
   const name = path.basename(filePath);
@@ -1110,8 +1111,10 @@ async function convertFileToTs(filePath, opts = {}) {
     const convOpts = {};
     if (opts.simplify) convOpts.simplify = opts.simplify;
     if (opts.textureSize) convOpts.textureSize = opts.textureSize;
+    if (opts.jpegTextures) convOpts.jpegTextures = true;
     const res = await convertToTs(filePath, convOpts);
-    const suffix = opts.simplify && opts.textureSize ? '.smallest.ts'
+    const suffix = opts.jpegTextures ? '.tiny.ts'
+      : opts.simplify && opts.textureSize ? '.smallest.ts'
       : opts.simplify ? '.simple.ts' : opts.textureSize ? '.small.ts' : '.ts';
     const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + suffix);
     fs.writeFileSync(outPath, res.code);
@@ -1121,8 +1124,8 @@ async function convertFileToTs(filePath, opts = {}) {
     const texNote = s.textures ? `, ${s.textures} texture${s.textures === 1 ? '' : 's'} embedded` : '';
     const triNote = s.originalTriangles && s.originalTriangles !== s.triangles
       ? `, triangles ${s.originalTriangles} → ${s.triangles}` : '';
-    const texSizeNote = s.textureResize && s.textureResize.resized
-      ? `, textures ${(s.textureResize.beforeBytes / 1048576).toFixed(1)} MB → ${(s.textureResize.afterBytes / 1048576).toFixed(1)} MB (max ${s.textureResize.cap}px)` : '';
+    const texSizeNote = s.textureResize && (s.textureResize.resized || s.textureResize.jpeg)
+      ? `, textures ${(s.textureResize.beforeBytes / 1048576).toFixed(1)} MB → ${(s.textureResize.afterBytes / 1048576).toFixed(1)} MB${s.textureResize.cap ? ` (max ${s.textureResize.cap}px)` : ''}${s.textureResize.jpeg ? `, ${s.textureResize.jpeg} as JPEG` : ''}` : '';
     const warnNote = res.warnings.length ? ` — ${res.warnings.length} warning(s): ${res.warnings[0]}` : '';
     return `Saved ${path.basename(outPath)} — ${s.parts} part(s)${triNote}${texNote}${texSizeNote}${warnNote}`;
   } catch (err) {
@@ -1157,6 +1160,7 @@ async function convertLastDownloadToTs(mode) {
   const opts = mode === 'simple' ? { simplify: 0.5 }
     : mode === 'small' ? { textureSize: 1024 }
     : mode === 'smallest' ? { simplify: 0.5, textureSize: 1024 }
+    : mode === 'tiny' ? { simplify: 0.5, textureSize: 512, jpegTextures: true }
     : {};
   const msg = await convertFileToTs(lastDownloadPath, opts);
   pushSidebarStatus(msg);
@@ -2073,19 +2077,13 @@ function buildMenu() {
         },
         {
           label: 'Convert last download to Three.js code',
-          click: () => convertLastDownloadToTs(),
-        },
-        {
-          label: 'Convert last download to Three.js code (simplified)',
-          click: () => convertLastDownloadToTs('simple'),
-        },
-        {
-          label: 'Convert last download to Three.js code (small textures)',
-          click: () => convertLastDownloadToTs('small'),
-        },
-        {
-          label: 'Convert last download to Three.js code (smallest)',
-          click: () => convertLastDownloadToTs('smallest'),
+          submenu: [
+            { label: 'Exact', click: () => convertLastDownloadToTs() },
+            { label: 'Simplified (half the triangles)', click: () => convertLastDownloadToTs('simple') },
+            { label: 'Small textures (1024px)', click: () => convertLastDownloadToTs('small') },
+            { label: 'Smallest (half + 1024px)', click: () => convertLastDownloadToTs('smallest') },
+            { label: 'Tiny (half + 512px + JPEG textures)', click: () => convertLastDownloadToTs('tiny') },
+          ],
         },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
@@ -2202,31 +2200,21 @@ function registerIpc() {
       });
     }
     // Models can also become runtime code: a self-contained .ts module
-    // that rebuilds the model with Three.js (textures embedded).
+    // that rebuilds the model with Three.js (textures embedded). The
+    // variants live in a submenu so the menu stays short.
     if (found.kind === 'model') {
+      const convert = (opts) => () => {
+        convertFileToTs(found.filePath, opts).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+      };
       items.push({
         label: 'Convert to Three.js code',
-        click: () => {
-          convertFileToTs(found.filePath).then((msg) => pushSidebarStatus(msg)).catch(() => {});
-        },
-      });
-      items.push({
-        label: 'Convert to Three.js code (simplified)',
-        click: () => {
-          convertFileToTs(found.filePath, { simplify: 0.5 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
-        },
-      });
-      items.push({
-        label: 'Convert to Three.js code (small textures)',
-        click: () => {
-          convertFileToTs(found.filePath, { textureSize: 1024 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
-        },
-      });
-      items.push({
-        label: 'Convert to Three.js code (smallest)',
-        click: () => {
-          convertFileToTs(found.filePath, { simplify: 0.5, textureSize: 1024 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
-        },
+        submenu: [
+          { label: 'Exact', click: convert({}) },
+          { label: 'Simplified (half the triangles)', click: convert({ simplify: 0.5 }) },
+          { label: 'Small textures (1024px)', click: convert({ textureSize: 1024 }) },
+          { label: 'Smallest (half + 1024px)', click: convert({ simplify: 0.5, textureSize: 1024 }) },
+          { label: 'Tiny (half + 512px + JPEG textures)', click: convert({ simplify: 0.5, textureSize: 512, jpegTextures: true }) },
+        ],
       });
     }
     items.push(

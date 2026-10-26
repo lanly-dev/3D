@@ -52,13 +52,16 @@ A small desktop wrapper around the Hunyuan3D web app
   runtime (geometry, materials, node tree, textures embedded). No AI and
   no approximation: the model's own numbers, as code. *Tools → Convert
   last download to Three.js code*, or right-click a model → **Convert to
-  Three.js code**; the `.ts` lands next to the model. A **(simplified)**
-  variant of both keeps about half the triangles for much smaller code
-  (shape slightly approximate; textures unchanged) and writes
-  `<name>.simple.ts`. A **(small textures)** variant caps embedded
-  textures at 1024 px — usually the biggest saving on textured models —
-  and writes `<name>.small.ts`. A **(smallest)** variant applies both and
-  writes `<name>.smallest.ts`.
+  Three.js code** — both open a submenu of variants; the `.ts` lands
+  next to the model. **Exact** is the faithful copy. **Simplified** keeps
+  about half the triangles for much smaller code (shape slightly
+  approximate; textures unchanged) and writes `<name>.simple.ts`.
+  **Small textures** caps embedded textures at 1024 px — usually the
+  biggest saving on textured models — and writes `<name>.small.ts`.
+  **Smallest** applies both and writes `<name>.smallest.ts`. **Tiny**
+  goes further — half the triangles, 512 px textures, and the color
+  textures re-encoded as JPEG (data maps like normals stay exact) — and
+  writes `<name>.tiny.ts`.
 
 It does not automate the site — no page scripting, no auto-clicking.
 

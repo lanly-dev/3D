@@ -488,55 +488,95 @@ function resampleRGBA(src, sw, sh, dw, dh) {
 }
 
 let _PNG = null, _jpeg = null;
-// Returns the re-encoded bytes when the image shrank, null when it is
-// already within the cap, or 'unsupported' for formats we cannot decode.
-// Throws when a supported format fails to decode/re-encode.
-async function shrinkImageBytes(bytes, mime, cap) {
-  if (mime === 'image/png') {
-    if (!_PNG) _PNG = (await import('pngjs')).PNG;
-    const img = _PNG.sync.read(Buffer.from(bytes));
-    const w = img.width, h = img.height;
-    if (Math.max(w, h) <= cap) return null;
-    const scale = cap / Math.max(w, h);
-    const dw = Math.max(1, Math.round(w * scale)), dh = Math.max(1, Math.round(h * scale));
-    const out = new _PNG({ width: dw, height: dh });
-    out.data = Buffer.from(resampleRGBA(img.data, w, h, dw, dh));
-    return _PNG.sync.write(out);
-  }
-  if (mime === 'image/jpeg') {
-    if (!_jpeg) _jpeg = (await import('jpeg-js')).default;
-    const img = _jpeg.decode(bytes, { useTArray: true, maxMemoryUsageInMB: 1024 });
-    const w = img.width, h = img.height;
-    if (Math.max(w, h) <= cap) return null;
-    const scale = cap / Math.max(w, h);
-    const dw = Math.max(1, Math.round(w * scale)), dh = Math.max(1, Math.round(h * scale));
-    const enc = _jpeg.encode({ data: resampleRGBA(img.data, w, h, dw, dh), width: dw, height: dh }, 85);
-    return Buffer.from(enc.data);
-  }
-  return 'unsupported';
+
+function hasRealAlpha(rgba) {
+  for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 255) return true;
+  return false;
 }
 
-async function shrinkModelTextures(model, cap) {
-  let resized = 0, beforeBytes = 0, afterBytes = 0, warnedUnsupported = false;
-  for (const t of model.textures) {
+// One texture through the size/format pipeline. Returns null when the
+// texture is fine as-is, 'unsupported' for formats we cannot decode,
+// 'alpha' when JPEG was requested but the image has transparency (JPEG
+// cannot store it), or { bytes, mime?, resized? } with the re-encode.
+// Throws when a supported format fails to decode/re-encode.
+async function processImageBytes(bytes, mime, cap, wantJpeg) {
+  if (mime !== 'image/png' && mime !== 'image/jpeg') return 'unsupported';
+  if (!_PNG) _PNG = (await import('pngjs')).PNG;
+  if (!_jpeg) _jpeg = (await import('jpeg-js')).default;
+  const img = mime === 'image/png'
+    ? _PNG.sync.read(Buffer.from(bytes))
+    : _jpeg.decode(bytes, { useTArray: true, maxMemoryUsageInMB: 1024 });
+  const w = img.width, h = img.height;
+  const needResize = !!cap && Math.max(w, h) > cap;
+  if (!needResize && !wantJpeg) return null;
+  const scale = needResize ? cap / Math.max(w, h) : 1;
+  const dw = needResize ? Math.max(1, Math.round(w * scale)) : w;
+  const dh = needResize ? Math.max(1, Math.round(h * scale)) : h;
+  const data = needResize ? resampleRGBA(img.data, w, h, dw, dh) : img.data;
+  if (wantJpeg && mime !== 'image/jpeg') {
+    if (hasRealAlpha(img.data)) return 'alpha';
+    const enc = _jpeg.encode({ data, width: dw, height: dh }, 85);
+    const out = Buffer.from(enc.data);
+    // JPEG wins big on photographic color maps, but a tiny flat PNG can
+    // beat it — keep whichever is smaller when no resize was needed.
+    if (!needResize && out.length >= bytes.length) return null;
+    return { bytes: out, mime: 'image/jpeg', resized: needResize };
+  }
+  if (!needResize) return null; // already JPEG, already within the cap
+  if (mime === 'image/png') {
+    const out = new _PNG({ width: dw, height: dh });
+    out.data = Buffer.from(data);
+    return { bytes: _PNG.sync.write(out), resized: true };
+  }
+  const enc = _jpeg.encode({ data, width: dw, height: dh }, 85);
+  return { bytes: Buffer.from(enc.data), resized: true };
+}
+
+// Texture slots that carry color (sRGB) — the only ones JPEG may touch.
+// Data maps (normal, roughness/metalness, occlusion, ...) keep their
+// exact values: JPEG artifacts there would corrupt the shading.
+const COLOR_SLOTS = new Set(['map', 'emissiveMap', 'specularColorMap']);
+
+async function processModelTextures(model, cap, wantJpeg) {
+  const slotsByTex = new Map();
+  if (wantJpeg) {
+    for (const m of model.materials) {
+      for (const [slot, info] of Object.entries(m.maps || {})) {
+        if (!slotsByTex.has(info.tex)) slotsByTex.set(info.tex, new Set());
+        slotsByTex.get(info.tex).add(slot);
+      }
+    }
+  }
+  let resized = 0, jpegd = 0, beforeBytes = 0, afterBytes = 0;
+  let warnedUnsupported = false, warnedAlpha = false;
+  for (let i = 0; i < model.textures.length; i++) {
+    const t = model.textures[i];
     beforeBytes += t.bytes.length;
     try {
-      const out = await shrinkImageBytes(t.bytes, t.mime, cap);
+      const slots = slotsByTex.get(i);
+      const colorOnly = wantJpeg && !!slots && [...slots].every((s) => COLOR_SLOTS.has(s));
+      const out = await processImageBytes(t.bytes, t.mime, cap, colorOnly);
       if (out === 'unsupported') {
         if (!warnedUnsupported) {
-          warn(`a texture format the converter cannot resize (${t.mime}) was kept at full size`);
+          warn(`a texture format the converter cannot re-encode (${t.mime}) was kept as-is`);
           warnedUnsupported = true;
         }
+      } else if (out === 'alpha') {
+        if (!warnedAlpha) {
+          warn('a color texture with transparency was kept as PNG — JPEG cannot store an alpha channel');
+          warnedAlpha = true;
+        }
       } else if (out) {
-        t.bytes = out;
-        resized++;
+        t.bytes = out.bytes;
+        if (out.mime && out.mime !== t.mime) { t.mime = out.mime; jpegd++; }
+        if (out.resized) resized++;
       }
     } catch {
-      warn(`a ${t.mime} texture could not be resized — kept at full size`);
+      warn(`a ${t.mime} texture could not be re-encoded — kept as-is`);
     }
     afterBytes += t.bytes.length;
   }
-  return { cap, resized, beforeBytes, afterBytes };
+  return { cap: cap || null, resized, jpeg: jpegd, beforeBytes, afterBytes };
 }
 
 // ===========================================================================
@@ -914,8 +954,9 @@ function countTriangles(model) {
  * message. Pass opts.simplify (0-1) to keep only about that fraction of
  * the triangles; stats then also carries originalTriangles. Pass
  * opts.textureSize (pixels) to cap every embedded texture's longest
- * side; stats then carries textureResize { cap, resized, beforeBytes,
- * afterBytes }.
+ * side, and opts.jpegTextures to additionally re-encode color textures
+ * (base color / emissive / specular color) as JPEG; stats then carries
+ * textureResize { cap, resized, jpeg, beforeBytes, afterBytes }.
  * Conversions are sequential: the module-level warnings list is reset
  * per call.
  */
@@ -942,12 +983,16 @@ export async function convertToTs(inputPath, opts = {}) {
     await simplifyModel(model, keep);
   }
   let textureResize;
-  if (opts.textureSize !== undefined && opts.textureSize !== null) {
-    const cap = Math.floor(Number(opts.textureSize));
-    if (!Number.isFinite(cap) || cap < 16) {
-      throw new Error('textureSize must be a pixel size of at least 16 (1024 caps every texture at 1024px on its longest side)');
+  const wantJpeg = !!opts.jpegTextures;
+  if ((opts.textureSize !== undefined && opts.textureSize !== null) || wantJpeg) {
+    let cap = null;
+    if (opts.textureSize !== undefined && opts.textureSize !== null) {
+      cap = Math.floor(Number(opts.textureSize));
+      if (!Number.isFinite(cap) || cap < 16) {
+        throw new Error('textureSize must be a pixel size of at least 16 (1024 caps every texture at 1024px on its longest side)');
+      }
     }
-    textureResize = await shrinkModelTextures(model, cap);
+    textureResize = await processModelTextures(model, cap, wantJpeg);
   }
   const createName = opts.name || pascal(path.basename(inputPath, path.extname(inputPath)));
   const code = emit(model, { ts: !opts.js, createName, sourceName: path.basename(inputPath) });
@@ -978,7 +1023,8 @@ async function main(argv) {
     else if (a === '--name') opts.name = args[++i];
     else if (a === '--simplify') opts.simplify = Number(args[++i]);
     else if (a === '--texture-size') opts.textureSize = Number(args[++i]);
-    else if (a === '-h' || a === '--help') { console.log('usage: glb2ts <model.glb|.gltf|.obj|.stl|.ply> [-o out.ts] [--js] [--name Name] [--simplify 0.5] [--texture-size 1024]'); return; }
+    else if (a === '--jpeg') opts.jpegTextures = true;
+    else if (a === '-h' || a === '--help') { console.log('usage: glb2ts <model.glb|.gltf|.obj|.stl|.ply> [-o out.ts] [--js] [--name Name] [--simplify 0.5] [--texture-size 1024] [--jpeg]'); return; }
     else positional.push(a);
   }
   const input = positional[0];
@@ -997,9 +1043,9 @@ async function main(argv) {
   const s = result.stats;
   const triNote = s.originalTriangles !== undefined ? `, triangles ${s.originalTriangles} -> ${s.triangles}` : `, ${s.triangles} triangles`;
   const texNote = s.textureResize
-    ? (s.textureResize.resized
-      ? `, textures ${(s.textureResize.beforeBytes / 1048576).toFixed(1)} MB -> ${(s.textureResize.afterBytes / 1048576).toFixed(1)} MB (max ${s.textureResize.cap}px)`
-      : `, textures already within ${s.textureResize.cap}px`)
+    ? ((s.textureResize.resized || s.textureResize.jpeg || s.textureResize.afterBytes !== s.textureResize.beforeBytes)
+      ? `, textures ${(s.textureResize.beforeBytes / 1048576).toFixed(1)} MB -> ${(s.textureResize.afterBytes / 1048576).toFixed(1)} MB${s.textureResize.cap ? ` (max ${s.textureResize.cap}px)` : ''}${s.textureResize.jpeg ? `, ${s.textureResize.jpeg} as JPEG` : ''}`
+      : (s.textureResize.cap ? `, textures already within ${s.textureResize.cap}px` : ', textures unchanged'))
     : '';
   console.log(`wrote ${outPath} (${(result.code.length / 1024).toFixed(1)} KB) — ${s.parts} part(s), ${s.geometries} geometries, ${s.materials} materials, ${s.textures} textures${triNote}${texNote}, ${result.warnings.length} warning(s)`);
 }
