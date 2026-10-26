@@ -2129,7 +2129,9 @@ function registerIpc() {
       a.viewer = a.kind === 'model' || assets.MODEL_EXTS.includes(ext) || isConvertedCodeFile(a.filePath);
     }
     for (const a of list) {
-      if (a.kind !== 'model' || !a.exists) continue;
+      // Thumbnails for everything the viewer can show: model files and
+      // converted code files (flagged `viewer` just above).
+      if (!a.viewer || !a.exists) continue;
       const meta = thumbs.get(a.id);
       const pngExists = fs.existsSync(thumbs.thumbPath(a.id));
       // Entries from an older renderer version count as stale even when

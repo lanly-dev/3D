@@ -42,7 +42,7 @@ A small desktop wrapper around the Hunyuan3D web app
   and FBX; other files still open with the default app. Converted
   Three.js code files (`.ts` / `.js` from the converter) open in the
   viewer too — it constructs the model by running the module's
-  `create…()` and renders the result. Model rows also
+  `create…()` and renders the result. Model and converted-code rows also
   get a small rendered thumbnail (cached under userData `thumbs/`),
   generated in the background on first sight.
 - **MeshCoder** (optional) — converts a mesh into part-segmented, editable

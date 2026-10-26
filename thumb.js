@@ -2,7 +2,9 @@
 // then reports readiness so the main process can capture the page.
 // Same loaders and framing as the viewer, minus the toolbar and controls.
 // GLB is fully self-contained; .gltf files with external textures or
-// .bin files only render their geometry here.
+// .bin files only render their geometry here. Converted code files
+// (.ts/.js from glb2ts) are constructed by importing the module and
+// calling its create…() factory, like the viewer does.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
@@ -64,9 +66,58 @@ function extOf(p) {
   return m ? m[1] : '';
 }
 
+// A constructed model's textures decode asynchronously; wait until
+// every texture image has finished (or a short deadline) so the
+// captured frame is the textured one, not the untextured first paint.
+function waitForTextures(root) {
+  const texs = [];
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach((m) => {
+      for (const key of Object.keys(m)) {
+        if (m[key] && m[key].isTexture) texs.push(m[key]);
+      }
+    });
+  });
+  if (!texs.length) return Promise.resolve();
+  const deadline = Date.now() + 2500;
+  return new Promise((resolve) => {
+    const tick = () => {
+      // A TextureLoader texture has no image at all until its load
+      // finishes — that, or a still-loading image, means "not ready".
+      const pending = texs.some((t) => !t.image || t.image.complete === false);
+      if (!pending || Date.now() > deadline) resolve();
+      else setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
 async function load() {
   if (!filePath) {
     done(false, 'no file given');
+    return;
+  }
+  const ext = extOf(filePath);
+  if (ext === 'ts' || ext === 'js' || ext === 'mjs') {
+    // Converted code: the main process hands over JS (TypeScript already
+    // transpiled); import it as a module and construct the model.
+    try {
+      const js = await window.viewerApi.readModule(filePath);
+      const blobUrl = URL.createObjectURL(new Blob([js], { type: 'text/javascript' }));
+      const mod = await import(blobUrl);
+      const names = Object.keys(mod).filter((k) => /^create[A-Z]/.test(k) && typeof mod[k] === 'function');
+      const factory = names.length ? mod[names[0]] : Object.values(mod).find((v) => typeof v === 'function');
+      if (!factory) throw new Error('this file exports no create…() function');
+      const obj = factory();
+      scene.add(obj);
+      fitCamera(obj);
+      await waitForTextures(obj);
+      done(true);
+    } catch (e) {
+      done(false, e);
+    }
     return;
   }
   let data;
@@ -81,7 +132,6 @@ async function load() {
     done(false, e);
     return;
   }
-  const ext = extOf(filePath);
   try {
     if (ext === 'glb' || ext === 'gltf') {
       const input = ext === 'gltf' ? new TextDecoder().decode(data) : data;
