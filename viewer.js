@@ -64,6 +64,44 @@ function setWireframe(root, on) {
   });
 }
 
+// Textures off = inspect the bare geometry (the "white model" look).
+// Every texture slot (map, normalMap, roughnessMap, ...) is stashed and
+// nulled, then restored verbatim — nothing about the model is modified.
+let texturesOn = true;
+const stashedMaps = new Map(); // material -> { prop: texture }
+
+function setTextures(root, on) {
+  const seen = new Set();
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach((m) => {
+      if (seen.has(m)) return;
+      seen.add(m);
+      if (!on) {
+        const saved = {};
+        for (const key of Object.keys(m)) {
+          if (m[key] && m[key].isTexture) {
+            saved[key] = m[key];
+            m[key] = null;
+          }
+        }
+        if (Object.keys(saved).length) {
+          stashedMaps.set(m, saved);
+          m.needsUpdate = true; // toggling a map changes the shader defines
+        }
+      } else {
+        const saved = stashedMaps.get(m);
+        if (saved) {
+          Object.assign(m, saved);
+          stashedMaps.delete(m);
+          m.needsUpdate = true;
+        }
+      }
+    });
+  });
+}
+
 function fitCamera(root) {
   const box = new THREE.Box3().setFromObject(root);
   if (box.isEmpty()) return;
@@ -157,6 +195,11 @@ async function load() {
   }
 }
 
+document.getElementById('texture').addEventListener('click', (e) => {
+  texturesOn = !texturesOn;
+  if (model) setTextures(model, texturesOn);
+  e.currentTarget.classList.toggle('active', texturesOn);
+});
 document.getElementById('wireframe').addEventListener('click', (e) => {
   wireframeOn = !wireframeOn;
   if (model) setWireframe(model, wireframeOn);

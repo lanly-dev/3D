@@ -36,8 +36,8 @@ A small desktop wrapper around the Hunyuan3D web app
   confirmation), or **Remove from list**. **Toggle DevTools** (Navigate
   menu, Ctrl+Shift+I or F12) toggles DevTools on the focused view.
 - **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
-  instead of the machine's default app: orbit / zoom / pan, wireframe,
-  auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY
+  instead of the machine's default app: orbit / zoom / pan, texture
+  on/off, wireframe, auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY
   and FBX; other files still open with the default app. Model rows also
   get a small rendered thumbnail (cached under userData `thumbs/`),
   generated in the background on first sight.
