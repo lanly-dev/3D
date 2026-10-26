@@ -738,7 +738,15 @@ async function renderThumb(id) {
       thumbs.set(id, fs.statSync(asset.filePath).mtimeMs);
       notifySidebarSoon();
     } else if (fs.existsSync(asset.filePath)) {
-      thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
+      // A failure caused by a missing dependency (the esbuild the code
+      // viewer/thumbnail path needs, before `npm install` has run) is an
+      // environment problem, not a bad file — don't pin it as failed,
+      // or the thumbnail would never retry once the install is fixed.
+      const pageError = win.isDestroyed() ? null
+        : await win.webContents.executeJavaScript('window.__thumbError || null').catch(() => null);
+      if (!/esbuild|cannot find module|err_module/i.test(String(pageError || ''))) {
+        thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
+      }
     }
   } finally {
     if (!win.isDestroyed()) win.close();
@@ -2152,8 +2160,17 @@ function registerIpc() {
     }
   });
   ipcMain.handle('assets:scan', (_e, folder) => {
-    const target = folder || app.getPath('downloads');
-    const added = assets.scanFolder(target);
+    if (folder) {
+      const added = assets.scanFolder(folder);
+      notifySidebar();
+      return added;
+    }
+    // No folder named: sweep Downloads plus every workspace folder —
+    // converted code lands next to its model, which usually lives in a
+    // workspace folder, not in Downloads.
+    const folders = [app.getPath('downloads'), ...workspaces.list().map((w) => w.folder).filter(Boolean)];
+    const added = [];
+    for (const f of new Set(folders)) added.push(...assets.scanFolder(f));
     notifySidebar();
     return added;
   });
