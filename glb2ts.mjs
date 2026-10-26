@@ -226,8 +226,15 @@ function loadGltf(inputPath) {
     slot(m.normalTexture, 'normalMap', { scale: m.normalTexture?.scale ?? 1 });
     slot(m.occlusionTexture, 'aoMap');
     slot(m.emissiveTexture, 'emissiveMap');
+    const spec = m.extensions?.KHR_materials_specular;
+    if (spec) {
+      out.specularIntensity = spec.specularFactor ?? 1;
+      if (spec.specularColorFactor) out.specularColor = spec.specularColorFactor.slice(0, 3);
+      slot(spec.specularTexture, 'specularIntensityMap');
+      slot(spec.specularColorTexture, 'specularColorMap');
+    }
     for (const ext of Object.keys(m.extensions || {})) {
-      if (!['KHR_materials_unlit', 'KHR_materials_emissive_strength'].includes(ext)) {
+      if (!['KHR_materials_unlit', 'KHR_materials_emissive_strength', 'KHR_materials_specular'].includes(ext)) {
         warn(`material "${m.name || ''}": extension ${ext} not carried over`);
       }
     }
@@ -474,7 +481,7 @@ function emit(model, { ts, createName, sourceName }) {
     if (!texConst.has(key)) texConst.set(key, `TEX_${texConst.size}`);
     return texConst.get(key);
   };
-  const SRGB_SLOTS = new Set(['map', 'emissiveMap']);
+  const SRGB_SLOTS = new Set(['map', 'emissiveMap', 'specularColorMap']);
   for (const m of model.materials) {
     for (const [slot, info] of Object.entries(m.maps)) info.constName = texNameFor(info.tex, SRGB_SLOTS.has(slot));
   }
@@ -520,7 +527,7 @@ function emit(model, { ts, createName, sourceName }) {
     } else {
       p.push(`color: ${colorLit(m.color)}`, `metalness: ${fmt(m.metalness)}`, `roughness: ${fmt(m.roughness)}`);
     }
-    for (const slot of ['map', 'metalnessMap', 'roughnessMap', 'normalMap', 'aoMap', 'emissiveMap']) {
+    for (const slot of ['map', 'metalnessMap', 'roughnessMap', 'normalMap', 'aoMap', 'emissiveMap', 'specularIntensityMap', 'specularColorMap']) {
       const info = m.maps[slot];
       if (!info) continue;
       p.push(`${slot}: ${info.constName}`);
@@ -538,7 +545,15 @@ function emit(model, { ts, createName, sourceName }) {
     if (m.alphaTest) p.push(`alphaTest: ${fmt(m.alphaTest)}`);
     if (m.doubleSided) p.push('side: THREE.DoubleSide');
     if (m.vertexColors) p.push('vertexColors: true');
-    const ctor = m.kind === 'basic' ? 'THREE.MeshBasicMaterial' : 'THREE.MeshStandardMaterial';
+    // KHR_materials_specular lives on MeshPhysicalMaterial in three.
+    const hasSpecular = m.specularIntensity !== undefined || m.specularColor !== undefined
+      || Boolean(m.maps.specularIntensityMap) || Boolean(m.maps.specularColorMap);
+    if (hasSpecular) {
+      if (m.specularIntensity !== undefined && m.specularIntensity !== 1) p.push(`specularIntensity: ${fmt(m.specularIntensity)}`);
+      if (m.specularColor) p.push(`specularColor: ${colorLit(m.specularColor)}`);
+    }
+    const ctor = m.kind === 'basic' ? 'THREE.MeshBasicMaterial'
+      : hasSpecular ? 'THREE.MeshPhysicalMaterial' : 'THREE.MeshStandardMaterial';
     return `new ${ctor}({ ${p.join(', ')} })`;
   };
   model.materials.forEach((m, i) => body.push(`const MAT_${i} = ${matConst(m)};`));
