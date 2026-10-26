@@ -10,7 +10,9 @@
  * renderer version: bump RENDER_VERSION whenever the render path changes
  * in a way that makes older thumbnails wrong (v2: the thumb page's CSP
  * blocked embedded textures, so every textured model rendered grey) and
- * stale entries are re-rendered once.
+ * stale entries are re-rendered once. v3: thumbnails for converted code
+ * files — the bump also clears failures that were pinned while the
+ * viewer's esbuild dependency was not yet installed on some machines.
  */
 const { app } = require('electron');
 const fs = require('fs');
@@ -38,7 +40,7 @@ function writeMeta(meta) {
   fs.writeFileSync(metaPath(), JSON.stringify(meta, null, 2));
 }
 
-const RENDER_VERSION = 2;
+const RENDER_VERSION = 3;
 
 function thumbPath(id) {
   return path.join(dir(), `${String(id)}.png`);

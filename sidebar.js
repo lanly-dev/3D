@@ -390,7 +390,7 @@ async function bootstrapScan() {
   const added = await bridge.scan();
   if (added.length) {
     await refresh();
-    setStatus(`Imported ${added.length} model(s) from Downloads`);
+    setStatus(`Imported ${added.length} file(s) from Downloads`);
   }
 }
 
@@ -496,7 +496,7 @@ $('status').addEventListener('click', () => {
 $('scan').addEventListener('click', async () => {
   const added = await bridge.scan();
   await refresh();
-  setStatus(added.length ? `Added ${added.length} asset(s)` : 'No new models found');
+  setStatus(added.length ? `Added ${added.length} asset(s)` : 'No new files found');
 });
 
 $('collapse').addEventListener('click', () => bridge.toggle());
