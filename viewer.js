@@ -146,6 +146,23 @@ async function load() {
     return;
   }
   setStatus('Loading…');
+  const ext = extOf(filePath);
+  if (ext === 'ts' || ext === 'js' || ext === 'mjs') {
+    // Converted code: the main process hands over JS (TypeScript already
+    // transpiled); import it as a module and construct the model.
+    try {
+      const js = await window.viewerApi.readModule(filePath);
+      const blobUrl = URL.createObjectURL(new Blob([js], { type: 'text/javascript' }));
+      const mod = await import(blobUrl);
+      const names = Object.keys(mod).filter((k) => /^create[A-Z]/.test(k) && typeof mod[k] === 'function');
+      const factory = names.length ? mod[names[0]] : Object.values(mod).find((v) => typeof v === 'function');
+      if (!factory) throw new Error('this file exports no create…() function');
+      showObject(factory());
+    } catch (e) {
+      showError(e);
+    }
+    return;
+  }
   let data;
   try {
     data = await window.viewerApi.readFile(filePath);
@@ -158,7 +175,6 @@ async function load() {
     showError(e);
     return;
   }
-  const ext = extOf(filePath);
   try {
     if (ext === 'glb' || ext === 'gltf') {
       const input = ext === 'gltf' ? new TextDecoder().decode(data) : data;

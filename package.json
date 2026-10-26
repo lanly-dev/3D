@@ -9,6 +9,7 @@
         "electron-packager": "^17.1.2"
     },
     "dependencies": {
+        "esbuild": "^0.28.2",
         "jpeg-js": "^0.4.4",
         "pngjs": "^7.0.0",
         "three": "^0.186.1"
