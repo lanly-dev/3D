@@ -1099,8 +1099,8 @@ async function loadGlb2ts() {
 /**
  * Convert one model file to <name>.ts next to it — <name>.simple.ts when
  * opts.simplify keeps only a fraction of the triangles, <name>.small.ts
- * when opts.textureSize caps the embedded textures; returns a status
- * message.
+ * when opts.textureSize caps the embedded textures, <name>.smallest.ts
+ * when both apply; returns a status message.
  */
 async function convertFileToTs(filePath, opts = {}) {
   const name = path.basename(filePath);
@@ -1111,7 +1111,8 @@ async function convertFileToTs(filePath, opts = {}) {
     if (opts.simplify) convOpts.simplify = opts.simplify;
     if (opts.textureSize) convOpts.textureSize = opts.textureSize;
     const res = await convertToTs(filePath, convOpts);
-    const suffix = opts.simplify ? '.simple.ts' : opts.textureSize ? '.small.ts' : '.ts';
+    const suffix = opts.simplify && opts.textureSize ? '.smallest.ts'
+      : opts.simplify ? '.simple.ts' : opts.textureSize ? '.small.ts' : '.ts';
     const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + suffix);
     fs.writeFileSync(outPath, res.code);
     assets.track(outPath);
@@ -1139,7 +1140,10 @@ async function convertLastDownloadToTs(mode) {
     });
     return;
   }
-  const opts = mode === 'simple' ? { simplify: 0.5 } : mode === 'small' ? { textureSize: 1024 } : {};
+  const opts = mode === 'simple' ? { simplify: 0.5 }
+    : mode === 'small' ? { textureSize: 1024 }
+    : mode === 'smallest' ? { simplify: 0.5, textureSize: 1024 }
+    : {};
   const msg = await convertFileToTs(lastDownloadPath, opts);
   pushSidebarStatus(msg);
   new Notification({ title: 'Hunyuan3D', body: msg }).show();
@@ -2065,6 +2069,10 @@ function buildMenu() {
           label: 'Convert last download to Three.js code (small textures)',
           click: () => convertLastDownloadToTs('small'),
         },
+        {
+          label: 'Convert last download to Three.js code (smallest)',
+          click: () => convertLastDownloadToTs('smallest'),
+        },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
@@ -2184,6 +2192,12 @@ function registerIpc() {
         label: 'Convert to Three.js code (small textures)',
         click: () => {
           convertFileToTs(found.filePath, { textureSize: 1024 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
+      });
+      items.push({
+        label: 'Convert to Three.js code (smallest)',
+        click: () => {
+          convertFileToTs(found.filePath, { simplify: 0.5, textureSize: 1024 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
         },
       });
     }

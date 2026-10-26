@@ -53,7 +53,8 @@ A small desktop wrapper around the Hunyuan3D web app
   (shape slightly approximate; textures unchanged) and writes
   `<name>.simple.ts`. A **(small textures)** variant caps embedded
   textures at 1024 px — usually the biggest saving on textured models —
-  and writes `<name>.small.ts`.
+  and writes `<name>.small.ts`. A **(smallest)** variant applies both and
+  writes `<name>.smallest.ts`.
 
 It does not automate the site — no page scripting, no auto-clicking.
 
