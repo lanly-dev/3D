@@ -11,6 +11,10 @@
  *   -o, --out <file>   output file (default: <model-name>.ts next to the input)
  *   --js               emit plain JavaScript (.mjs-style body) instead of TypeScript
  *   --name <Name>      exported builder name suffix (default: from the file name)
+ *   --simplify <0-1>   keep only about this fraction of the triangles
+ *                      (0.5 = half). Lossy, like tracing a photo into an SVG:
+ *                      the shape gets simpler and the code much smaller,
+ *                      while the exact version stays the default.
  *
  * Supported: static models. GLB/GLTF with embedded or sibling resources,
  * PBR materials and textures; OBJ (+ .mtl colors/textures), STL, PLY.
@@ -23,6 +27,7 @@ import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 
 // ---------------------------------------------------------------------------
 // Intermediate representation
@@ -311,6 +316,140 @@ function applyVertexColorFlags(model) {
   };
   const walk = (n) => { mark(n.mesh); n.extraMeshes.forEach(mark); n.children.forEach(walk); };
   model.roots.forEach(walk);
+}
+
+// ===========================================================================
+// Optional lossy simplification — the "SVG tracing" step
+// ===========================================================================
+
+/**
+ * Reduce every geometry to about `keepRatio` of its triangles, in place.
+ * Uses three's SimplifyModifier (meshoptimizer edge collapse underneath);
+ * normals and UVs feed its error metric, so shading and texture seams are
+ * preserved as far as the target allows. All attributes of surviving
+ * vertices are carried over verbatim.
+ *
+ * Guard rails:
+ * - geometries with per-group materials are skipped (their group ranges
+ *   point into the index buffer that simplification rewrites);
+ * - shapes under 24 triangles are left alone (collapsing a box breaks it);
+ * - a geometry is never simplified below 12 triangles, and a failed or
+ *   non-shrinking attempt keeps the original geometry.
+ *
+ * Hard-edge meshes (Blender primitives and the like) defeat the collapse:
+ * their vertices are split per face, so almost no edge is shared. Those
+ * get a fallback — weld by position, simplify, then restore flat face
+ * normals — but only when nothing needs the UVs or vertex colors that
+ * welding would drop (a material with a texture map, or a color attribute).
+ *
+ * Returns { before, after } triangle totals.
+ */
+async function simplifyModel(model, keepRatio) {
+  const grouped = new Set();
+  const uvNeeded = new Set();
+  const collect = (n) => {
+    const refs = n.mesh ? [n.mesh, ...n.extraMeshes] : [];
+    for (const r of refs) {
+      if (r.groupMaterials) grouped.add(r.geometry);
+      const mats = r.groupMaterials ? r.groupMaterials.map((g) => g.material) : [r.material];
+      for (const mi of mats) {
+        if (mi >= 0 && model.materials[mi] && Object.keys(model.materials[mi].maps || {}).length) {
+          uvNeeded.add(r.geometry);
+        }
+      }
+    }
+    n.children.forEach(collect);
+  };
+  model.roots.forEach(collect);
+
+  const triCountOf = (ir) => {
+    const pos = ir.attributes.find((a) => a.name === 'position');
+    if (!pos) return 0;
+    return Math.floor((ir.index ? ir.index.length : pos.array.length / pos.itemSize) / 3);
+  };
+
+  const modifier = new SimplifyModifier();
+  let before = 0, after = 0;
+  for (let i = 0; i < model.geometries.length; i++) {
+    const ir = model.geometries[i];
+    const tris = triCountOf(ir);
+    before += tris;
+    if (grouped.has(i) || tris < 24 || Math.max(12, Math.floor(tris * keepRatio)) >= tris) {
+      after += tris;
+      continue;
+    }
+    const geo = new THREE.BufferGeometry();
+    for (const a of ir.attributes) geo.setAttribute(a.name, new THREE.BufferAttribute(a.array, a.itemSize));
+    if (ir.index) geo.setIndex(new THREE.BufferAttribute(ir.index, 1));
+    const pos = ir.attributes.find((a) => a.name === 'position');
+    const remove = Math.max(1, Math.round((pos.array.length / pos.itemSize) * (1 - keepRatio)));
+    let outIr = null;
+    try {
+      outIr = geometryToIR(await modifier.modify(geo, remove));
+    } catch {
+      outIr = null;
+    }
+    const outTris = outIr ? triCountOf(outIr) : 0;
+    if (outIr && outTris >= 3 && outTris < tris) {
+      model.geometries[i] = outIr;
+      after += outTris;
+      continue;
+    }
+    // Fallback for split-vertex (hard-edge) geometry the collapse could
+    // not shrink: weld by position, simplify positions only, then expand
+    // back out with flat face normals. Drops UVs and any other attribute,
+    // so it only runs when no mapped material needs this geometry's UVs
+    // and the geometry carries no vertex colors.
+    const canWeld = !uvNeeded.has(i) && !ir.attributes.some((a) => a.name === 'color');
+    let weldedIr = null;
+    if (canWeld) {
+      try {
+        const posAttr = ir.attributes.find((a) => a.name === 'position');
+        const src = posAttr.array, item = posAttr.itemSize;
+        const vertCount = src.length / item;
+        const indexArr = [];
+        if (ir.index) { for (let k = 0; k < ir.index.length; k++) indexArr.push(ir.index[k]); }
+        else { for (let k = 0; k < vertCount; k++) indexArr.push(k); }
+        const byPos = new Map();
+        const weldedPos = [];
+        const remap = new Uint32Array(vertCount);
+        for (let v = 0; v < vertCount; v++) {
+          const key = `${src[v * item]},${src[v * item + 1]},${src[v * item + 2]}`;
+          if (!byPos.has(key)) { byPos.set(key, weldedPos.length / 3); weldedPos.push(src[v * item], src[v * item + 1], src[v * item + 2]); }
+          remap[v] = byPos.get(key);
+        }
+        const weldedCount = weldedPos.length / 3;
+        if (weldedCount < vertCount) {
+          const wgeo = new THREE.BufferGeometry();
+          wgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(weldedPos), 3));
+          wgeo.setIndex(new THREE.BufferAttribute(new Uint32Array(indexArr.map((ix) => remap[ix])), 1));
+          const wRemove = Math.max(1, Math.round(weldedCount * (1 - keepRatio)));
+          const wOut = await modifier.modify(wgeo, wRemove);
+          const flat = wOut.index ? wOut.toNonIndexed() : wOut;
+          flat.computeVertexNormals();
+          weldedIr = geometryToIR(flat);
+        }
+      } catch {
+        weldedIr = null;
+      }
+    }
+    const weldedTris = weldedIr ? triCountOf(weldedIr) : 0;
+    if (weldedIr && weldedTris >= 3 && weldedTris < tris) {
+      model.geometries[i] = weldedIr;
+      after += weldedTris;
+      continue;
+    }
+    after += tris;
+  }
+  if (grouped.size) {
+    warn(`${grouped.size} geometry(ies) with per-group materials were not simplified (group ranges would break)`);
+  }
+  if (after < before) {
+    warn(`geometry simplified: ${before} triangles -> ${after} (kept about ${Math.round(keepRatio * 100)}%) — shape is approximate, textures and materials unchanged`);
+  } else {
+    warn('geometry simplification was requested but nothing could be reduced — the meshes are already low-poly');
+  }
+  return { before, after };
 }
 
 // ===========================================================================
@@ -683,12 +822,14 @@ function countTriangles(model) {
 
 /**
  * Convert one model file to TypeScript (or JS) source.
- * Returns { code, createName, warnings, stats } — throws on unsupported
- * formats or undecodable compression, with a plain-language message.
+ * Resolves with { code, createName, warnings, stats } — throws (rejects)
+ * on unsupported formats or undecodable compression, with a plain-language
+ * message. Pass opts.simplify (0-1) to keep only about that fraction of
+ * the triangles; stats then also carries originalTriangles.
  * Conversions are sequential: the module-level warnings list is reset
  * per call.
  */
-export function convertToTs(inputPath, opts = {}) {
+export async function convertToTs(inputPath, opts = {}) {
   warnings.length = 0;
   const ext = path.extname(inputPath).toLowerCase();
   let model;
@@ -700,6 +841,15 @@ export function convertToTs(inputPath, opts = {}) {
     throw new Error('FBX is not supported directly — export it as GLB first (e.g. open it in Blender and export glTF binary), then convert that.');
   } else {
     throw new Error('unsupported format: ' + (ext || '(none)'));
+  }
+  let originalTriangles;
+  if (opts.simplify !== undefined && opts.simplify !== null) {
+    const keep = Number(opts.simplify);
+    if (!Number.isFinite(keep) || keep <= 0 || keep >= 1) {
+      throw new Error('simplify must be a number between 0 and 1 (0.5 keeps about half the triangles)');
+    }
+    originalTriangles = countTriangles(model);
+    await simplifyModel(model, keep);
   }
   const createName = opts.name || pascal(path.basename(inputPath, path.extname(inputPath)));
   const code = emit(model, { ts: !opts.js, createName, sourceName: path.basename(inputPath) });
@@ -713,11 +863,12 @@ export function convertToTs(inputPath, opts = {}) {
       materials: model.materials.length,
       textures: model.textures.length,
       triangles: countTriangles(model),
+      ...(originalTriangles !== undefined ? { originalTriangles } : {}),
     },
   };
 }
 
-function main(argv) {
+async function main(argv) {
   const args = argv.slice(2);
   const opts = { js: false, out: null, name: null };
   const positional = [];
@@ -726,7 +877,8 @@ function main(argv) {
     if (a === '--js') opts.js = true;
     else if (a === '-o' || a === '--out') opts.out = args[++i];
     else if (a === '--name') opts.name = args[++i];
-    else if (a === '-h' || a === '--help') { console.log('usage: glb2ts <model.glb|.gltf|.obj|.stl|.ply> [-o out.ts] [--js] [--name Name]'); return; }
+    else if (a === '--simplify') opts.simplify = Number(args[++i]);
+    else if (a === '-h' || a === '--help') { console.log('usage: glb2ts <model.glb|.gltf|.obj|.stl|.ply> [-o out.ts] [--js] [--name Name] [--simplify 0.5]'); return; }
     else positional.push(a);
   }
   const input = positional[0];
@@ -735,7 +887,7 @@ function main(argv) {
 
   let result;
   try {
-    result = convertToTs(input, opts);
+    result = await convertToTs(input, opts);
   } catch (err) {
     console.error(String(err && err.message ? err.message : err));
     process.exit(2);
@@ -743,7 +895,8 @@ function main(argv) {
   const outPath = opts.out || path.join(path.dirname(input), path.basename(input, path.extname(input)) + (opts.js ? '.js' : '.ts'));
   fs.writeFileSync(outPath, result.code);
   const s = result.stats;
-  console.log(`wrote ${outPath} (${(result.code.length / 1024).toFixed(1)} KB) — ${s.parts} part(s), ${s.geometries} geometries, ${s.materials} materials, ${s.textures} textures, ${result.warnings.length} warning(s)`);
+  const triNote = s.originalTriangles !== undefined ? `, triangles ${s.originalTriangles} -> ${s.triangles}` : `, ${s.triangles} triangles`;
+  console.log(`wrote ${outPath} (${(result.code.length / 1024).toFixed(1)} KB) — ${s.parts} part(s), ${s.geometries} geometries, ${s.materials} materials, ${s.textures} textures${triNote}, ${result.warnings.length} warning(s)`);
 }
 
 import { pathToFileURL } from 'node:url';

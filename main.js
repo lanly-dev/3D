@@ -1096,27 +1096,34 @@ async function loadGlb2ts() {
   return glb2tsModule;
 }
 
-/** Convert one model file to <name>.ts next to it; returns a status message. */
-async function convertFileToTs(filePath) {
+/**
+ * Convert one model file to <name>.ts next to it (or <name>.simple.ts
+ * when opts.simplify keeps only a fraction of the triangles); returns a
+ * status message.
+ */
+async function convertFileToTs(filePath, opts = {}) {
   const name = path.basename(filePath);
   if (!fs.existsSync(filePath)) return `Convert to Three.js code: ${name} — file not found on disk`;
   try {
     const { convertToTs } = await loadGlb2ts();
-    const res = convertToTs(filePath);
-    const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + '.ts');
+    const res = await convertToTs(filePath, opts.simplify ? { simplify: opts.simplify } : {});
+    const suffix = opts.simplify ? '.simple.ts' : '.ts';
+    const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + suffix);
     fs.writeFileSync(outPath, res.code);
     assets.track(outPath);
     notifySidebar();
     const s = res.stats;
     const texNote = s.textures ? `, ${s.textures} texture${s.textures === 1 ? '' : 's'} embedded` : '';
+    const triNote = s.originalTriangles && s.originalTriangles !== s.triangles
+      ? `, triangles ${s.originalTriangles} → ${s.triangles}` : '';
     const warnNote = res.warnings.length ? ` — ${res.warnings.length} warning(s): ${res.warnings[0]}` : '';
-    return `Saved ${path.basename(outPath)} — ${s.parts} part(s)${texNote}${warnNote}`;
+    return `Saved ${path.basename(outPath)} — ${s.parts} part(s)${triNote}${texNote}${warnNote}`;
   } catch (err) {
     return `Convert to Three.js code failed (${name}): ${String(err && err.message ? err.message : err)}`;
   }
 }
 
-async function convertLastDownloadToTs() {
+async function convertLastDownloadToTs(simplify) {
   const win = focusedWindow();
   if (!lastDownloadPath || !fs.existsSync(lastDownloadPath)) {
     await dialog.showMessageBox(win, {
@@ -1126,7 +1133,7 @@ async function convertLastDownloadToTs() {
     });
     return;
   }
-  const msg = await convertFileToTs(lastDownloadPath);
+  const msg = await convertFileToTs(lastDownloadPath, simplify ? { simplify: 0.5 } : {});
   pushSidebarStatus(msg);
   new Notification({ title: 'Hunyuan3D', body: msg }).show();
 }
@@ -2043,6 +2050,10 @@ function buildMenu() {
           label: 'Convert last download to Three.js code',
           click: () => convertLastDownloadToTs(),
         },
+        {
+          label: 'Convert last download to Three.js code (simplified)',
+          click: () => convertLastDownloadToTs(true),
+        },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
@@ -2150,6 +2161,12 @@ function registerIpc() {
         label: 'Convert to Three.js code',
         click: () => {
           convertFileToTs(found.filePath).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
+      });
+      items.push({
+        label: 'Convert to Three.js code (simplified)',
+        click: () => {
+          convertFileToTs(found.filePath, { simplify: 0.5 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
         },
       });
     }

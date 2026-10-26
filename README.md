@@ -48,7 +48,10 @@ A small desktop wrapper around the Hunyuan3D web app
   runtime (geometry, materials, node tree, textures embedded). No AI and
   no approximation: the model's own numbers, as code. *Tools → Convert
   last download to Three.js code*, or right-click a model → **Convert to
-  Three.js code**; the `.ts` lands next to the model.
+  Three.js code**; the `.ts` lands next to the model. A **(simplified)**
+  variant of both keeps about half the triangles for much smaller code
+  (shape slightly approximate; textures unchanged) and writes
+  `<name>.simple.ts`.
 
 It does not automate the site — no page scripting, no auto-clicking.
 
