@@ -51,7 +51,9 @@ A small desktop wrapper around the Hunyuan3D web app
   Three.js code**; the `.ts` lands next to the model. A **(simplified)**
   variant of both keeps about half the triangles for much smaller code
   (shape slightly approximate; textures unchanged) and writes
-  `<name>.simple.ts`.
+  `<name>.simple.ts`. A **(small textures)** variant caps embedded
+  textures at 1024 px — usually the biggest saving on textured models —
+  and writes `<name>.small.ts`.
 
 It does not automate the site — no page scripting, no auto-clicking.
 

@@ -1097,17 +1097,21 @@ async function loadGlb2ts() {
 }
 
 /**
- * Convert one model file to <name>.ts next to it (or <name>.simple.ts
- * when opts.simplify keeps only a fraction of the triangles); returns a
- * status message.
+ * Convert one model file to <name>.ts next to it — <name>.simple.ts when
+ * opts.simplify keeps only a fraction of the triangles, <name>.small.ts
+ * when opts.textureSize caps the embedded textures; returns a status
+ * message.
  */
 async function convertFileToTs(filePath, opts = {}) {
   const name = path.basename(filePath);
   if (!fs.existsSync(filePath)) return `Convert to Three.js code: ${name} — file not found on disk`;
   try {
     const { convertToTs } = await loadGlb2ts();
-    const res = await convertToTs(filePath, opts.simplify ? { simplify: opts.simplify } : {});
-    const suffix = opts.simplify ? '.simple.ts' : '.ts';
+    const convOpts = {};
+    if (opts.simplify) convOpts.simplify = opts.simplify;
+    if (opts.textureSize) convOpts.textureSize = opts.textureSize;
+    const res = await convertToTs(filePath, convOpts);
+    const suffix = opts.simplify ? '.simple.ts' : opts.textureSize ? '.small.ts' : '.ts';
     const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + suffix);
     fs.writeFileSync(outPath, res.code);
     assets.track(outPath);
@@ -1116,14 +1120,16 @@ async function convertFileToTs(filePath, opts = {}) {
     const texNote = s.textures ? `, ${s.textures} texture${s.textures === 1 ? '' : 's'} embedded` : '';
     const triNote = s.originalTriangles && s.originalTriangles !== s.triangles
       ? `, triangles ${s.originalTriangles} → ${s.triangles}` : '';
+    const texSizeNote = s.textureResize && s.textureResize.resized
+      ? `, textures ${(s.textureResize.beforeBytes / 1048576).toFixed(1)} MB → ${(s.textureResize.afterBytes / 1048576).toFixed(1)} MB (max ${s.textureResize.cap}px)` : '';
     const warnNote = res.warnings.length ? ` — ${res.warnings.length} warning(s): ${res.warnings[0]}` : '';
-    return `Saved ${path.basename(outPath)} — ${s.parts} part(s)${triNote}${texNote}${warnNote}`;
+    return `Saved ${path.basename(outPath)} — ${s.parts} part(s)${triNote}${texNote}${texSizeNote}${warnNote}`;
   } catch (err) {
     return `Convert to Three.js code failed (${name}): ${String(err && err.message ? err.message : err)}`;
   }
 }
 
-async function convertLastDownloadToTs(simplify) {
+async function convertLastDownloadToTs(mode) {
   const win = focusedWindow();
   if (!lastDownloadPath || !fs.existsSync(lastDownloadPath)) {
     await dialog.showMessageBox(win, {
@@ -1133,7 +1139,8 @@ async function convertLastDownloadToTs(simplify) {
     });
     return;
   }
-  const msg = await convertFileToTs(lastDownloadPath, simplify ? { simplify: 0.5 } : {});
+  const opts = mode === 'simple' ? { simplify: 0.5 } : mode === 'small' ? { textureSize: 1024 } : {};
+  const msg = await convertFileToTs(lastDownloadPath, opts);
   pushSidebarStatus(msg);
   new Notification({ title: 'Hunyuan3D', body: msg }).show();
 }
@@ -2052,7 +2059,11 @@ function buildMenu() {
         },
         {
           label: 'Convert last download to Three.js code (simplified)',
-          click: () => convertLastDownloadToTs(true),
+          click: () => convertLastDownloadToTs('simple'),
+        },
+        {
+          label: 'Convert last download to Three.js code (small textures)',
+          click: () => convertLastDownloadToTs('small'),
         },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
@@ -2167,6 +2178,12 @@ function registerIpc() {
         label: 'Convert to Three.js code (simplified)',
         click: () => {
           convertFileToTs(found.filePath, { simplify: 0.5 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
+      });
+      items.push({
+        label: 'Convert to Three.js code (small textures)',
+        click: () => {
+          convertFileToTs(found.filePath, { textureSize: 1024 }).then((msg) => pushSidebarStatus(msg)).catch(() => {});
         },
       });
     }

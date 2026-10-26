@@ -15,6 +15,10 @@
  *                      (0.5 = half). Lossy, like tracing a photo into an SVG:
  *                      the shape gets simpler and the code much smaller,
  *                      while the exact version stays the default.
+ *   --texture-size <px> cap every embedded texture's longest side at
+ *                      this many pixels (1024 is a good default). Textures
+ *                      are usually most of a model's megabytes, so this
+ *                      is the big lever for textured models.
  *
  * Supported: static models. GLB/GLTF with embedded or sibling resources,
  * PBR materials and textures; OBJ (+ .mtl colors/textures), STL, PLY.
@@ -453,6 +457,89 @@ async function simplifyModel(model, keepRatio) {
 }
 
 // ===========================================================================
+// Texture shrinking (--texture-size): cap the largest dimension of every
+// embedded texture, re-encoding at the smaller size. Textures are usually
+// most of a model's megabytes (Lan's robot: 33.8 of 35.4 MB), so this is
+// the lever that actually shrinks textured models' code. PNG stays PNG,
+// JPEG stays JPEG; anything else (WebP…) is kept full-size with a warning.
+// Resampling happens on the encoded pixel values, like most quick tools.
+// ===========================================================================
+
+function resampleRGBA(src, sw, sh, dw, dh) {
+  const dst = new Uint8Array(dw * dh * 4);
+  const xRatio = sw / dw, yRatio = sh / dh;
+  for (let y = 0; y < dh; y++) {
+    const sy = (y + 0.5) * yRatio - 0.5;
+    const y0 = Math.max(0, Math.floor(sy)), y1 = Math.min(sh - 1, y0 + 1);
+    const fy = Math.min(1, Math.max(0, sy - y0));
+    for (let x = 0; x < dw; x++) {
+      const sx = (x + 0.5) * xRatio - 0.5;
+      const x0 = Math.max(0, Math.floor(sx)), x1 = Math.min(sw - 1, x0 + 1);
+      const fx = Math.min(1, Math.max(0, sx - x0));
+      const di = (y * dw + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = src[(y0 * sw + x0) * 4 + c] * (1 - fx) + src[(y0 * sw + x1) * 4 + c] * fx;
+        const bot = src[(y1 * sw + x0) * 4 + c] * (1 - fx) + src[(y1 * sw + x1) * 4 + c] * fx;
+        dst[di + c] = Math.round(top * (1 - fy) + bot * fy);
+      }
+    }
+  }
+  return dst;
+}
+
+let _PNG = null, _jpeg = null;
+// Returns the re-encoded bytes when the image shrank, null when it is
+// already within the cap, or 'unsupported' for formats we cannot decode.
+// Throws when a supported format fails to decode/re-encode.
+async function shrinkImageBytes(bytes, mime, cap) {
+  if (mime === 'image/png') {
+    if (!_PNG) _PNG = (await import('pngjs')).PNG;
+    const img = _PNG.sync.read(Buffer.from(bytes));
+    const w = img.width, h = img.height;
+    if (Math.max(w, h) <= cap) return null;
+    const scale = cap / Math.max(w, h);
+    const dw = Math.max(1, Math.round(w * scale)), dh = Math.max(1, Math.round(h * scale));
+    const out = new _PNG({ width: dw, height: dh });
+    out.data = Buffer.from(resampleRGBA(img.data, w, h, dw, dh));
+    return _PNG.sync.write(out);
+  }
+  if (mime === 'image/jpeg') {
+    if (!_jpeg) _jpeg = (await import('jpeg-js')).default;
+    const img = _jpeg.decode(bytes, { useTArray: true, maxMemoryUsageInMB: 1024 });
+    const w = img.width, h = img.height;
+    if (Math.max(w, h) <= cap) return null;
+    const scale = cap / Math.max(w, h);
+    const dw = Math.max(1, Math.round(w * scale)), dh = Math.max(1, Math.round(h * scale));
+    const enc = _jpeg.encode({ data: resampleRGBA(img.data, w, h, dw, dh), width: dw, height: dh }, 85);
+    return Buffer.from(enc.data);
+  }
+  return 'unsupported';
+}
+
+async function shrinkModelTextures(model, cap) {
+  let resized = 0, beforeBytes = 0, afterBytes = 0, warnedUnsupported = false;
+  for (const t of model.textures) {
+    beforeBytes += t.bytes.length;
+    try {
+      const out = await shrinkImageBytes(t.bytes, t.mime, cap);
+      if (out === 'unsupported') {
+        if (!warnedUnsupported) {
+          warn(`a texture format the converter cannot resize (${t.mime}) was kept at full size`);
+          warnedUnsupported = true;
+        }
+      } else if (out) {
+        t.bytes = out;
+        resized++;
+      }
+    } catch {
+      warn(`a ${t.mime} texture could not be resized — kept at full size`);
+    }
+    afterBytes += t.bytes.length;
+  }
+  return { cap, resized, beforeBytes, afterBytes };
+}
+
+// ===========================================================================
 // OBJ / STL / PLY (parsed with three's own loaders, then read back into IR)
 // ===========================================================================
 
@@ -825,7 +912,10 @@ function countTriangles(model) {
  * Resolves with { code, createName, warnings, stats } — throws (rejects)
  * on unsupported formats or undecodable compression, with a plain-language
  * message. Pass opts.simplify (0-1) to keep only about that fraction of
- * the triangles; stats then also carries originalTriangles.
+ * the triangles; stats then also carries originalTriangles. Pass
+ * opts.textureSize (pixels) to cap every embedded texture's longest
+ * side; stats then carries textureResize { cap, resized, beforeBytes,
+ * afterBytes }.
  * Conversions are sequential: the module-level warnings list is reset
  * per call.
  */
@@ -851,6 +941,14 @@ export async function convertToTs(inputPath, opts = {}) {
     originalTriangles = countTriangles(model);
     await simplifyModel(model, keep);
   }
+  let textureResize;
+  if (opts.textureSize !== undefined && opts.textureSize !== null) {
+    const cap = Math.floor(Number(opts.textureSize));
+    if (!Number.isFinite(cap) || cap < 16) {
+      throw new Error('textureSize must be a pixel size of at least 16 (1024 caps every texture at 1024px on its longest side)');
+    }
+    textureResize = await shrinkModelTextures(model, cap);
+  }
   const createName = opts.name || pascal(path.basename(inputPath, path.extname(inputPath)));
   const code = emit(model, { ts: !opts.js, createName, sourceName: path.basename(inputPath) });
   return {
@@ -864,6 +962,7 @@ export async function convertToTs(inputPath, opts = {}) {
       textures: model.textures.length,
       triangles: countTriangles(model),
       ...(originalTriangles !== undefined ? { originalTriangles } : {}),
+      ...(textureResize ? { textureResize } : {}),
     },
   };
 }
@@ -878,7 +977,8 @@ async function main(argv) {
     else if (a === '-o' || a === '--out') opts.out = args[++i];
     else if (a === '--name') opts.name = args[++i];
     else if (a === '--simplify') opts.simplify = Number(args[++i]);
-    else if (a === '-h' || a === '--help') { console.log('usage: glb2ts <model.glb|.gltf|.obj|.stl|.ply> [-o out.ts] [--js] [--name Name] [--simplify 0.5]'); return; }
+    else if (a === '--texture-size') opts.textureSize = Number(args[++i]);
+    else if (a === '-h' || a === '--help') { console.log('usage: glb2ts <model.glb|.gltf|.obj|.stl|.ply> [-o out.ts] [--js] [--name Name] [--simplify 0.5] [--texture-size 1024]'); return; }
     else positional.push(a);
   }
   const input = positional[0];
@@ -896,7 +996,12 @@ async function main(argv) {
   fs.writeFileSync(outPath, result.code);
   const s = result.stats;
   const triNote = s.originalTriangles !== undefined ? `, triangles ${s.originalTriangles} -> ${s.triangles}` : `, ${s.triangles} triangles`;
-  console.log(`wrote ${outPath} (${(result.code.length / 1024).toFixed(1)} KB) — ${s.parts} part(s), ${s.geometries} geometries, ${s.materials} materials, ${s.textures} textures${triNote}, ${result.warnings.length} warning(s)`);
+  const texNote = s.textureResize
+    ? (s.textureResize.resized
+      ? `, textures ${(s.textureResize.beforeBytes / 1048576).toFixed(1)} MB -> ${(s.textureResize.afterBytes / 1048576).toFixed(1)} MB (max ${s.textureResize.cap}px)`
+      : `, textures already within ${s.textureResize.cap}px`)
+    : '';
+  console.log(`wrote ${outPath} (${(result.code.length / 1024).toFixed(1)} KB) — ${s.parts} part(s), ${s.geometries} geometries, ${s.materials} materials, ${s.textures} textures${triNote}${texNote}, ${result.warnings.length} warning(s)`);
 }
 
 import { pathToFileURL } from 'node:url';
