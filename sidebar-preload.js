@@ -20,11 +20,6 @@ contextBridge.exposeInMainWorld('api', {
   copy: (text) => ipcRenderer.invoke('sidebar:copy', text),
   convert: (id) => ipcRenderer.invoke('assets:convert', id),
 
-  // Compounding engine
-  library: () => ipcRenderer.invoke('compounding:library'),
-  compound: (workspaceId, options) => ipcRenderer.invoke('compounding:compound', workspaceId, options),
-  revealCompound: (filePath) => ipcRenderer.invoke('compounding:reveal', filePath),
-
   // Workspaces
   workspaces: () => ipcRenderer.invoke('workspaces:list'),
   createWorkspace: (payload) => ipcRenderer.invoke('workspaces:create', payload),

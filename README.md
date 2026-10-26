@@ -43,26 +43,8 @@ A small desktop wrapper around the Hunyuan3D web app
   generated in the background on first sight.
 - **MeshCoder** (optional) — converts a mesh into part-segmented, editable
   Blender Python code using a local MeshCoder install.
-- **Compounding engine** — accumulates the parts produced by every conversion
-  into a reusable library, and can compound a workspace into a single Blender
-  scene script that re-uses earlier work instead of regenerating it.
 
 It does not automate the site — no page scripting, no auto-clicking.
-
-## Compounding engine
-
-Every MeshCoder conversion is harvested for part names and added to a
-persistent library (`<userData>/compounding.json`). The sidebar shows the
-accumulated parts; **Compound build** writes `<workspace>.compound.py`, a
-Blender 4.x script that imports the tracked meshes and re-executes the
-previously generated scripts, so each build accumulates on the last.
-
-- **Menu** — *Tools → Compound active workspace*, *Tools → Reveal parts library file*.
-- **Sidebar** — the *Compounding engine* panel, with **Compound build** and
-  **Library file** buttons.
-
-Compound scripts are excluded from later builds' reuse chain, so the chain
-stays bounded.
 
 ## Workspaces
 
@@ -80,7 +62,6 @@ dropdown, the **+** / **⋯** buttons, or **Menu → Workspaces**. Stored in
 | --- | --- |
 | `<userData>/assets.json` | Asset index |
 | `<userData>/workspaces.json` | Workspaces + active one |
-| `<userData>/compounding.json` | Part library + build history |
 | `<userData>/layout.json` | Sidebar width + visibility |
 
 **View → Reveal asset index file** opens the folder. Untracking an asset never

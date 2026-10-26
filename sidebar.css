@@ -99,7 +99,6 @@ body.collapsed .head,
 body.collapsed .wsbar,
 body.collapsed .stats,
 body.collapsed .toolbar,
-body.collapsed .compound,
 body.collapsed .list,
 body.collapsed .foot { display: none; }
 body.collapsed .rail-btn { display: block; }
@@ -251,63 +250,6 @@ body.collapsed .grip { width: 4px; }
 .btn.primary:hover { filter: brightness(1.1); }
 .btn.danger { color: var(--danger); border-color: rgba(242, 84, 91, .5); }
 .btn.danger:hover { background: rgba(242, 84, 91, .14); }
-
-/* ---------- compounding engine ---------- */
-.compound {
-  margin: 0 12px 10px;
-  padding: 10px;
-  background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.compound-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.compound-title {
-  font-weight: 600;
-  font-size: 12px;
-}
-
-.compound-count {
-  color: var(--fg-dim);
-  font-size: 10px;
-}
-
-.compound-parts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 8px 0;
-  max-height: 96px;
-  overflow-y: auto;
-}
-
-.part-tag {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: rgba(138, 92, 246, .16);
-  color: #d5c6ff;
-  border: 1px solid rgba(138, 92, 246, .28);
-  white-space: nowrap;
-}
-.part-tag.more { background: var(--bg-3); color: var(--fg-dim); border-color: var(--line); }
-
-.compound-hint {
-  color: var(--fg-dim);
-  font-size: 11px;
-}
-
-.compound-actions {
-  display: flex;
-  gap: 6px;
-}
-.compound-actions .btn { flex: 1 1 auto; font-size: 11px; padding: 5px 8px; }
 
 /* ---------- list ---------- */
 .list {

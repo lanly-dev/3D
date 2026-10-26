@@ -45,7 +45,6 @@ const blenderprep = require('./blenderprep');
 const assets = require('./assets');
 const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
-const compounding = require('./compounding');
 
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
 const APP_TITLE = 'Hunyuan3D';
@@ -1114,8 +1113,6 @@ async function convertLastDownload() {
     // Register the generated script as an asset linked to its source mesh.
     const mesh = assets.track(lastDownloadPath, 'model', owner ? owner.id : null);
     assets.linkCode(codePath, mesh.id);
-    // Feed the new parts into the compounding library.
-    compounding.harvest(codePath, path.basename(lastDownloadPath));
     notifySidebar();
     new Notification({ title: 'Hunyuan3D', body: `Blender code saved: ${path.basename(codePath)}` }).show();
     if (conversionUi.syntaxIssue) {
@@ -1525,30 +1522,6 @@ async function runSetup(token) {
     setupRunning = false;
     setupChild = null;
     setupCancelDownload = null;
-  }
-}
-
-/**
- * Build a compound script for the active workspace: import its meshes and
- * re-use the scripts generated earlier, so the work accumulates.
- */
-async function compoundActiveWorkspace() {
-  const win = focusedWindow();
-  const ws = workspaces.active();
-  try {
-    const res = compounding.compoundWorkspace(ws ? ws.id : null);
-    notifySidebar();
-    new Notification({
-      title: 'Hunyuan3D',
-      body: `Compound build saved: ${path.basename(res.filePath)}`,
-    }).show();
-    shell.showItemInFolder(res.filePath);
-  } catch (err) {
-    await dialog.showMessageBox(win, {
-      type: 'info',
-      message: 'Nothing to compound',
-      detail: String(err && err.message ? err.message : err),
-    });
   }
 }
 
@@ -2022,15 +1995,6 @@ function buildMenu() {
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
         { label: 'Prepare Blender for MeshCoder scripts…', click: () => openPrepWindow() },
-        { type: 'separator' },
-        {
-          label: 'Compound active workspace',
-          click: () => compoundActiveWorkspace(),
-        },
-        {
-          label: 'Reveal parts library file',
-          click: () => shell.showItemInFolder(compounding.storePath()),
-        },
       ],
     },
   ];
@@ -2228,7 +2192,6 @@ function registerIpc() {
       const codePath = await meshcoder.convertToCode(asset.filePath, outDir, conversionProgressOpts());
       const mesh = assets.track(asset.filePath, 'model', owner ? owner.id : null);
       assets.linkCode(codePath, mesh.id);
-      compounding.harvest(codePath, path.basename(asset.filePath));
       notifySidebar();
       new Notification({
         title: 'Hunyuan3D',
@@ -2252,38 +2215,6 @@ function registerIpc() {
       stopConversionUi();
       notifySidebar();
     }
-  });
-
-  // --- compounding engine --------------------------------------------
-  ipcMain.handle('compounding:library', () => compounding.library());
-  ipcMain.handle('compounding:compound', async (_e, workspaceId, options) => {
-    try {
-      const res = compounding.compoundWorkspace(workspaceId || null, options || {});
-      notifySidebar();
-      new Notification({
-        title: 'Hunyuan3D',
-        body: `Compound build saved: ${path.basename(res.filePath)}`,
-      }).show();
-      return {
-        message: `Saved ${path.basename(res.filePath)} (${res.meshes} mesh(es), ${res.scripts} script(s) re-used)`,
-        filePath: res.filePath,
-      };
-    } catch (err) {
-      return { message: `Failed: ${String(err && err.message ? err.message : err)}` };
-    }
-  });
-  ipcMain.handle('compounding:reveal', (_e, filePath) => {
-    const p = String(filePath || '');
-    if (!p) {
-      // No file given — reveal the compounding store itself.
-      const store = compounding.storePath();
-      fs.mkdirSync(path.dirname(store), { recursive: true });
-      shell.showItemInFolder(store);
-      return true;
-    }
-    if (!fs.existsSync(p)) return false;
-    shell.showItemInFolder(p);
-    return true;
   });
 
   ipcMain.handle('sidebar:toggle', () => toggleSidebar());

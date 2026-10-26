@@ -18,7 +18,6 @@ MeshCoder to turn meshes into editable Blender Python code.
 | File | Purpose |
 |------|---------|
 | `main.js` | Electron main process: windows, menu, IPC, downloads, MeshCoder conversion |
-| `compounding.js` | Part library + compound Blender script generation |
 | `assets.js` | Tracked asset index (models, scripts, workspaces) |
 | `workspaces.js` | Named project folders + active workspace |
 | `meshcoder.js` | Calls MeshCoder inference on a mesh |
@@ -28,10 +27,9 @@ MeshCoder to turn meshes into editable Blender Python code.
 
 ## Conventions
 
-- Persistence goes in Electron `userData` (e.g. `assets.json`, `compounding.json`, `workspaces.json`).
+- Persistence goes in Electron `userData` (e.g. `assets.json`, `workspaces.json`).
 - Untracking an asset never touches the file on disk.
 - MeshCoder output: `<name>.blender.py` next to the mesh, run inside Blender 4.x.
-- Compound builds: `<workspace>.compound.py`; excludes prior `.compound.py` scripts from reuse.
 
 ## Common gotchas
 

@@ -164,41 +164,6 @@ function renderStats(stats) {
     : 'Hunyuan3D';
 }
 
-/**
- * Render the compounding library — the parts accumulated so far.
- */
-async function renderLibrary() {
-  const lib = await bridge.library();
-  const parts = lib.parts || [];
-  $('compound-count').textContent = parts.length
-    ? `${parts.length} part${parts.length === 1 ? '' : 's'}`
-    : 'no parts yet';
-
-  const box = $('compound-parts');
-  box.innerHTML = '';
-  if (!parts.length) {
-    const hint = document.createElement('div');
-    hint.className = 'compound-hint';
-    hint.textContent = 'Convert a mesh to start building the library.';
-    box.appendChild(hint);
-    return;
-  }
-  // Show the most-used parts; the rest stay in the store.
-  for (const p of parts.slice(0, 24)) {
-    const tag = document.createElement('span');
-    tag.className = 'part-tag';
-    tag.title = p.sources && p.sources.length ? p.sources.join(', ') : p.name;
-    tag.textContent = p.count > 1 ? `${p.name} ×${p.count}` : p.name;
-    box.appendChild(tag);
-  }
-  if (parts.length > 24) {
-    const more = document.createElement('span');
-    more.className = 'part-tag more';
-    more.textContent = `+${parts.length - 24}`;
-    box.appendChild(more);
-  }
-}
-
 function renderList() {
   const list = $('list');
   const items = visibleAssets();
@@ -413,7 +378,6 @@ async function refresh() {
   const scope = state.scope === 'all' ? null : state.scope;
   renderStats(await bridge.stats(scope));
   renderList();
-  renderLibrary().catch((e) => console.error('library render failed', e));
 }
 
 /** On a fresh store, pull in whatever models already sit in Downloads. */
@@ -534,24 +498,6 @@ $('scan').addEventListener('click', async () => {
 
 $('collapse').addEventListener('click', () => bridge.toggle());
 $('expand').addEventListener('click', () => bridge.toggle());
-
-// --- compounding engine ---
-$('compound-build').addEventListener('click', async () => {
-  const btn = $('compound-build');
-  btn.disabled = true;
-  setStatus('Compounding…');
-  // Scope the build to the workspace the list is showing.
-  const scope = state.scope === 'all' || state.scope === 'unassigned' ? null : state.scope;
-  const res = await bridge.compound(scope, {});
-  btn.disabled = false;
-  setStatus(res.message || 'Done');
-  await refresh();
-});
-
-$('compound-reveal').addEventListener('click', () => {
-  bridge.revealCompound('').catch(() => {});
-  setStatus('Parts library file is in the app data folder');
-});
 
 // --- collapsed state comes from the main process ---
 function setCollapsed(collapsed) {

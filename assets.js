@@ -67,7 +67,6 @@ function describe(filePath, existing) {
     createdAt: existing ? existing.createdAt : Date.now(),
     updatedAt: mtime,
     meshId: existing ? existing.meshId : null,
-    compound: existing ? Boolean(existing.compound) : false,
     workspaceId: existing && existing.workspaceId !== undefined ? existing.workspaceId : null,
   };
 }
