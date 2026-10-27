@@ -62,29 +62,29 @@ html, body {
   display: inline-flex;
   background: var(--bg-3);
   border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 2px;
+  border-radius: 7px;
+  padding: 0 2px;
   gap: 2px;
 }
 .pill button {
   flex: 0 0 auto;
   border: none;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg);
   font: inherit;
-  font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 16px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 4px;
   cursor: pointer;
 }
 .pill-label {
   flex: 0 0 auto;
-  color: var(--fg);
-  font-size: 11px;
+  color: var(--fg-dim);
+  font-size: 12px;
   padding: 4px 6px;
   user-select: none;
 }
-.pill button:hover { background: var(--line); color: var(--fg); }
+.pill button:hover { background: var(--line); }
 .pill button.active { background: var(--accent); color: #fff; }
 
 #status {

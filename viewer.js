@@ -60,17 +60,12 @@ function setTheme(dark) {
   darkTheme = dark;
   document.body.dataset.theme = dark ? 'dark' : 'light';
   scene.background = new THREE.Color(dark ? 0x14161b : 0x8c929c);
-  // More ambient fill in light mode so the model isn't flat or dark
-  // against the brighter background; dimmer in dark mode.
-  ambientIntensity = dark ? 1.0 : 3.0;
-  hemiLight.intensity = ambientIntensity;
   fillLight.intensity = dark ? 0.6 : 1;
   keyLight.intensity = dark ? 2 : 1.4;
-  updateAmbientLabel();
 }
 
 function setAmbient(delta) {
-  ambientIntensity = Math.min(8, Math.max(0, ambientIntensity + delta));
+  ambientIntensity = Math.min(15, Math.max(0, ambientIntensity + delta));
   hemiLight.intensity = ambientIntensity;
   updateAmbientLabel();
   setStatus(`Ambient light: ${ambientIntensity.toFixed(1)}`);
@@ -261,10 +256,10 @@ document.getElementById('theme').addEventListener('click', (e) => {
   e.currentTarget.classList.toggle('active', !darkTheme);
 });
 document.getElementById('ambientDown').addEventListener('click', () => {
-  setAmbient(-0.5);
+  setAmbient(-1);
 });
 document.getElementById('ambientUp').addEventListener('click', () => {
-  setAmbient(0.5);
+  setAmbient(1);
 });
 document.getElementById('reset').addEventListener('click', () => {
   if (model) fitCamera(model);
