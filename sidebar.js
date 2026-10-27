@@ -295,9 +295,11 @@ function renderList() {
     const body = document.createElement('div');
     body.className = 'item-body';
     body.append(top, meta, actions);
-    if (a.kind === 'model') {
+    if (a.viewer) {
       // Rendered preview when cached, else a small placeholder tile with
-      // the extension while the background worker renders it.
+      // the extension while the background worker renders it. Covers
+      // models and converted code files (.ts/.js/.mjs from glb2ts),
+      // which the main process flags `viewer` in assets:list.
       let thumb;
       if (a.thumb) {
         thumb = document.createElement('img');
