@@ -657,6 +657,11 @@ function saveLayout() {
 const thumbQueue = new Set();
 let thumbWorking = false;
 let thumbCurrent = null;
+// Converted-code thumbnail failures are surfaced on the sidebar status
+// line (once per file per session) instead of failing silently — the
+// usual cause is a missing `npm install` for the esbuild dependency,
+// which the user can only fix if the app says what is missing.
+const thumbErrorSurfaced = new Set();
 let thumbNotifyTimer = null;
 
 /**
@@ -744,8 +749,15 @@ async function renderThumb(id) {
       // or the thumbnail would never retry once the install is fixed.
       const pageError = win.isDestroyed() ? null
         : await win.webContents.executeJavaScript('window.__thumbError || null').catch(() => null);
-      if (!/esbuild|cannot find module|err_module/i.test(String(pageError || ''))) {
+      const missingDep = /esbuild|cannot find module|err_module/i.test(String(pageError || ''));
+      if (!missingDep) {
         thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
+      }
+      if (isConvertedCodeFile(asset.filePath) && !thumbErrorSurfaced.has(asset.id)) {
+        thumbErrorSurfaced.add(asset.id);
+        pushSidebarStatus(missingDep
+          ? `Thumbnail for ${path.basename(asset.filePath)} needs a dependency: run npm install in the app folder, then restart`
+          : `Thumbnail failed for ${path.basename(asset.filePath)}: ${pageError || 'timed out'}`);
       }
     }
   } finally {
