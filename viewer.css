@@ -87,6 +87,59 @@ html, body {
 .pill button:hover { background: var(--line); }
 .pill button.active { background: var(--accent); color: #fff; }
 
+#partsPanel {
+  position: fixed;
+  left: 0;
+  top: 38px;
+  bottom: 0;
+  width: 240px;
+  background: rgba(35, 39, 51, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-right: 1px solid var(--line);
+  color: var(--fg);
+  font-size: 12px;
+  display: none;
+  flex-direction: column;
+  z-index: 20;
+}
+body[data-theme="light"] #partsPanel {
+  background: rgba(231, 233, 238, 0.2);
+}
+#partsPanel.open { display: flex; }
+#partsHeader {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#partsCount { color: var(--fg-dim); font-weight: 400; font-size: 11px; }
+#partsList {
+  overflow-y: auto;
+  flex: 1;
+}
+.part-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.part-row:last-child { border-bottom: none; }
+.part-row .part-vis { flex: 0 0 auto; font-size: 13px; }
+.part-row .part-vis.hidden { opacity: 0.35; filter: grayscale(1); }
+.part-row .part-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.part-row .part-name.hidden { color: var(--fg-dim); }
+.part-row.highlighted { background: rgba(76, 141, 255, 0.15); }
+
 #status {
   position: fixed;
   left: 10px;
