@@ -40,6 +40,7 @@ controls.enableDamping = true;
 controls.autoRotateSpeed = 1.5;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x30303a, 1.2));
+const hemiLight = scene.children.find((c) => c.isHemisphereLight);
 const keyLight = new THREE.DirectionalLight(0xffffff, 2);
 keyLight.position.set(5, 8, 5);
 scene.add(keyLight);
@@ -52,6 +53,32 @@ scene.add(grid);
 
 let model = null;
 let wireframeOn = false;
+let darkTheme = true;
+let ambientIntensity = darkTheme ? 1.0 : 3.0;
+
+function setTheme(dark) {
+  darkTheme = dark;
+  document.body.dataset.theme = dark ? 'dark' : 'light';
+  scene.background = new THREE.Color(dark ? 0x14161b : 0x8c929c);
+  // More ambient fill in light mode so the model isn't flat or dark
+  // against the brighter background; dimmer in dark mode.
+  ambientIntensity = dark ? 1.0 : 3.0;
+  hemiLight.intensity = ambientIntensity;
+  fillLight.intensity = dark ? 0.6 : 1;
+  keyLight.intensity = dark ? 2 : 1.4;
+  updateAmbientLabel();
+}
+
+function setAmbient(delta) {
+  ambientIntensity = Math.min(8, Math.max(0, ambientIntensity + delta));
+  hemiLight.intensity = ambientIntensity;
+  updateAmbientLabel();
+  setStatus(`Ambient light: ${ambientIntensity.toFixed(1)}`);
+}
+
+function updateAmbientLabel() {
+  document.getElementById('ambientLabel').textContent = `Ambient ${ambientIntensity.toFixed(1)}`;
+}
 
 function setWireframe(root, on) {
   root.traverse((obj) => {
@@ -228,6 +255,16 @@ document.getElementById('rotate').addEventListener('click', (e) => {
 document.getElementById('grid').addEventListener('click', (e) => {
   grid.visible = !grid.visible;
   e.currentTarget.classList.toggle('active', grid.visible);
+});
+document.getElementById('theme').addEventListener('click', (e) => {
+  setTheme(!darkTheme);
+  e.currentTarget.classList.toggle('active', !darkTheme);
+});
+document.getElementById('ambientDown').addEventListener('click', () => {
+  setAmbient(-0.5);
+});
+document.getElementById('ambientUp').addEventListener('click', () => {
+  setAmbient(0.5);
 });
 document.getElementById('reset').addEventListener('click', () => {
   if (model) fitCamera(model);
