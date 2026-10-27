@@ -659,8 +659,8 @@ let thumbWorking = false;
 let thumbCurrent = null;
 // Converted-code thumbnail failures are surfaced on the sidebar status
 // line (once per file per session) instead of failing silently — the
-// usual cause is a missing `npm install` for the esbuild dependency,
-// which the user can only fix if the app says what is missing.
+// usual cause is a missing `npm install` for a dependency, which the
+// user can only fix if the app says what is missing.
 const thumbErrorSurfaced = new Set();
 let codeDepChecked = false;
 let thumbNotifyTimer = null;
@@ -744,13 +744,13 @@ async function renderThumb(id) {
       thumbs.set(id, fs.statSync(asset.filePath).mtimeMs);
       notifySidebarSoon();
     } else if (fs.existsSync(asset.filePath)) {
-      // A failure caused by a missing dependency (the esbuild the code
-      // viewer/thumbnail path needs, before `npm install` has run) is an
-      // environment problem, not a bad file — don't pin it as failed,
-      // or the thumbnail would never retry once the install is fixed.
+      // A failure caused by a missing dependency (the transpiler the
+      // code viewer/thumbnail path needs, before `npm install` has run)
+      // is an environment problem, not a bad file — don't pin it as
+      // failed, or the thumbnail would never retry once fixed.
       const pageError = win.isDestroyed() ? null
         : await win.webContents.executeJavaScript('window.__thumbError || null').catch(() => null);
-      const missingDep = /esbuild|cannot find module|err_module/i.test(String(pageError || ''));
+      const missingDep = /sucrase|esbuild|cannot find module|err_module/i.test(String(pageError || ''));
       if (!missingDep) {
         thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
       }
@@ -2137,17 +2137,16 @@ function registerIpc() {
       a.viewer = a.kind === 'model' || assets.MODEL_EXTS.includes(ext) || isConvertedCodeFile(a.filePath);
     }
     // One-time functional check, the first time converted code is on
-    // screen: viewing/thumbnailing it needs esbuild to transpile the
-    // TypeScript. If esbuild is missing or its platform binary is
-    // absent (npm install not run since it was added), say so on the
-    // status line immediately instead of letting thumbnails fail
+    // screen: viewing/thumbnailing it needs the sucrase transpiler. If
+    // it is missing (npm install not run since it was added), say so on
+    // the status line immediately instead of letting thumbnails fail
     // silently one by one.
     if (!codeDepChecked && list.some((a) => a.viewer && isConvertedCodeFile(a.filePath))) {
       codeDepChecked = true;
       try {
-        require('esbuild').transformSync('let x: number = 1;', { loader: 'ts' });
+        require('sucrase').transform('let x: number = 1;', { transforms: ['typescript'] });
       } catch {
-        pushSidebarStatus('Code viewer/thumbnails need esbuild: run npm install in the app folder, then restart the app');
+        pushSidebarStatus('Code viewer/thumbnails need a dependency: run npm install in the app folder, then restart the app');
       }
     }
     for (const a of list) {
@@ -2323,12 +2322,15 @@ function registerIpc() {
   });
   // The viewer window's copy of a converted code file: the source, with
   // TypeScript transpiled to JS so the page can import it as a module and
-  // call its create…() factory.
+  // call its create…() factory. The transpiler is sucrase — pure
+  // JavaScript, no native binary and no install scripts (esbuild's
+  // postinstall/binary was silently blocked by npm's allow-scripts on
+  // at least one machine, which killed only the code thumbnails).
   ipcMain.handle('viewer:readModule', (_e, filePath) => {
     const p = String(filePath || '');
     const code = fs.readFileSync(p, 'utf8');
     if (!/\.ts$/i.test(p)) return code;
-    return require('esbuild').transformSync(code, { loader: 'ts', format: 'esm', target: 'es2022' }).code;
+    return require('sucrase').transform(code, { transforms: ['typescript'] }).code;
   });
   // The viewer window's file bytes, as a clean ArrayBuffer (a Node Buffer
   // would arrive with a pooled backing store and a nonzero byteOffset).
