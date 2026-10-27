@@ -662,6 +662,7 @@ let thumbCurrent = null;
 // usual cause is a missing `npm install` for the esbuild dependency,
 // which the user can only fix if the app says what is missing.
 const thumbErrorSurfaced = new Set();
+let codeDepChecked = false;
 let thumbNotifyTimer = null;
 
 /**
@@ -2134,6 +2135,20 @@ function registerIpc() {
     for (const a of list) {
       const ext = path.extname(a.filePath || '').toLowerCase();
       a.viewer = a.kind === 'model' || assets.MODEL_EXTS.includes(ext) || isConvertedCodeFile(a.filePath);
+    }
+    // One-time functional check, the first time converted code is on
+    // screen: viewing/thumbnailing it needs esbuild to transpile the
+    // TypeScript. If esbuild is missing or its platform binary is
+    // absent (npm install not run since it was added), say so on the
+    // status line immediately instead of letting thumbnails fail
+    // silently one by one.
+    if (!codeDepChecked && list.some((a) => a.viewer && isConvertedCodeFile(a.filePath))) {
+      codeDepChecked = true;
+      try {
+        require('esbuild').transformSync('let x: number = 1;', { loader: 'ts' });
+      } catch {
+        pushSidebarStatus('Code viewer/thumbnails need esbuild: run npm install in the app folder, then restart the app');
+      }
     }
     for (const a of list) {
       // Thumbnails for everything the viewer can show: model files and
