@@ -13,6 +13,11 @@
  * stale entries are re-rendered once. v3: thumbnails for converted code
  * files — the bump also clears failures that were pinned while the
  * viewer's esbuild dependency was not yet installed on some machines.
+ * v4: the transpiler changed (esbuild → sucrase) after npm's
+ * allow-scripts silently blocked esbuild's postinstall on the user's
+ * machine; failures pinned at v3 during that broken window would
+ * otherwise never retry, leaving code thumbnails permanently absent
+ * with no error anywhere.
  */
 const { app } = require('electron');
 const fs = require('fs');
@@ -40,7 +45,7 @@ function writeMeta(meta) {
   fs.writeFileSync(metaPath(), JSON.stringify(meta, null, 2));
 }
 
-const RENDER_VERSION = 3;
+const RENDER_VERSION = 4;
 
 function thumbPath(id) {
   return path.join(dir(), `${String(id)}.png`);
