@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Same import map (and CSP hash) as viewer.html / thumb.html. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self' blob: 'sha256-mpAYHjxf9UQwzjPXl6zDbUDmmDa2rewAQLxARrr8Slo='; img-src 'self' blob: data:; connect-src 'self' blob: data:;" />
+    <title>Mixamo export</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js",
+          "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module" src="mixamo-export.js"></script>
+  </body>
+</html>

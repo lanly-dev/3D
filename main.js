@@ -47,12 +47,15 @@ const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
 
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
+const MIXAMO_URL = 'https://www.mixamo.com/';
 const APP_TITLE = 'Hunyuan3D';
 // Chrome UA (the raw Electron UA makes many sites serve broken pages).
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
 // Domains that belong to the login/app flow and should stay in-app.
 const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'gtimg.com', 'qpic.cn'];
+// Mixamo sign-in runs through Adobe ID — its hosts stay in-app too.
+const MIXAMO_IN_APP_HOSTS = ['mixamo.com', 'adobe.com', 'adobelogin.com'];
 
 // Sidebar layout
 const SIDEBAR_MIN_WIDTH = 200;
@@ -171,11 +174,26 @@ function conversionFailureReport(err) {
   return { excerpt, logPath };
 }
 
-/** Main window + its two views (sidebar + site). */
+/** Main window + its views (sidebar + the two site tabs). */
 let mainWindow = null;
 let sidebarView = null;
 let siteView = null;
+let mixamoView = null;
 let navView = null;
+/** Which site tab fills the content area: 'hunyuan' | 'mixamo'. */
+let activeSite = 'hunyuan';
+
+/** The site view the nav bar currently drives (history + zoom). */
+function activeView() {
+  return activeSite === 'mixamo' && mixamoView ? mixamoView : siteView;
+}
+
+/** Switch the content area between the Hunyuan3D and Mixamo tabs. */
+function setActiveSite(name) {
+  activeSite = name === 'mixamo' ? 'mixamo' : 'hunyuan';
+  layoutViews();
+  pushNavState();
+}
 const viewerWindows = new Set();
 let sidebarVisible = true;
 let sidebarWidth = SIDEBAR_DEFAULT_WIDTH;
@@ -576,26 +594,28 @@ function injectTranslator(contents) {
   contents.executeJavaScript(TRANSLATE_SNIPPET).catch(() => {});
 }
 
-function isInApp(url) {
+function isInApp(url, hosts = IN_APP_HOSTS) {
   try {
     const host = new URL(url).hostname.toLowerCase();
-    return IN_APP_HOSTS.some((d) => host === d || host.endsWith('.' + d));
+    return hosts.some((d) => host === d || host.endsWith('.' + d));
   } catch {
     return false;
   }
 }
 
-function applyWindowOpenHandler(contents) {
+function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
   contents.setWindowOpenHandler(({ url }) => {
-    if (isInApp(url)) {
+    if (isInApp(url, hosts)) {
       // A WebContentsView cannot open a child window directly — create it.
+      // The child shares the SOURCE view's session, so a Mixamo popup
+      // stays in the Adobe login session and a Hunyuan popup in Tencent's.
       if (contents.getType() === 'window') {
-        return { action: 'allow', overrideBrowserWindowOptions: childWindowOptions() };
+        return { action: 'allow', overrideBrowserWindowOptions: childWindowOptions(contents.session) };
       }
-      const child = new BrowserWindow(childWindowOptions());
+      const child = new BrowserWindow(childWindowOptions(contents.session));
       child.webContents.setUserAgent(CHROME_UA);
       child.loadURL(url);
-      applyWindowOpenHandler(child.webContents);
+      applyWindowOpenHandler(child.webContents, hosts);
       return { action: 'deny' };
     }
     shell.openExternal(url).catch(() => {});
@@ -603,13 +623,13 @@ function applyWindowOpenHandler(contents) {
   });
 }
 
-function childWindowOptions() {
+function childWindowOptions(ses) {
   return {
     width: 1000,
     height: 760,
     title: APP_TITLE,
     webPreferences: {
-      session: session.fromPartition('persist:hunyuan3d'),
+      session: ses || session.fromPartition('persist:hunyuan3d'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -796,12 +816,16 @@ function openViewer(filePath) {
  *   - siteView:    the Hunyuan3D web app
  * The sidebar can be collapsed/expanded and resized by dragging its edge.
  */
-function createMainWindow() {
-  const ses = session.fromPartition('persist:hunyuan3d');
-  ses.setUserAgent(CHROME_UA);
+const downloadSessions = new Set();
 
-  // Downloads: auto-save into the active workspace folder (or Downloads)
-  // with a de-duplicated filename.
+/**
+ * Downloads from a site session: auto-save into the active workspace
+ * folder (or Downloads) with a de-duplicated filename, then register the
+ * file as a managed asset. Shared by the Hunyuan3D and Mixamo tabs.
+ */
+function attachDownloadHandler(ses, label, fallbackName) {
+  if (downloadSessions.has(ses)) return;
+  downloadSessions.add(ses);
   ses.on('will-download', (_event, item) => {
     const ws = workspaces.active();
     const downloads = ws && ws.folder ? ws.folder : app.getPath('downloads');
@@ -810,7 +834,7 @@ function createMainWindow() {
     } catch {
       /* fall through — item.setSavePath will surface the real error */
     }
-    let target = path.join(downloads, item.getFilename() || 'hunyuan3d-model.glb');
+    let target = path.join(downloads, item.getFilename() || fallbackName);
     const ext = path.extname(target);
     const base = path.basename(target, ext);
     let n = 1;
@@ -825,11 +849,20 @@ function createMainWindow() {
         // Register the download as a managed asset in its workspace.
         const record = assets.track(target, 'model', ws ? ws.id : null);
         notifySidebar();
-        new Notification({ title: 'Hunyuan3D', body: `Saved: ${path.basename(target)}` }).show();
+        new Notification({ title: label, body: `Saved: ${path.basename(target)}` }).show();
         void record;
       }
     });
   });
+}
+
+function createMainWindow() {
+  const ses = session.fromPartition('persist:hunyuan3d');
+  ses.setUserAgent(CHROME_UA);
+  attachDownloadHandler(ses, 'Hunyuan3D', 'hunyuan3d-model.glb');
+  const mixamoSes = session.fromPartition('persist:mixamo');
+  mixamoSes.setUserAgent(CHROME_UA);
+  attachDownloadHandler(mixamoSes, 'Mixamo', 'mixamo-model.fbx');
 
   const win = new BrowserWindow({
     width: 1440,
@@ -906,9 +939,39 @@ function createMainWindow() {
     siteContents.on('dom-ready', () => injectTranslator(siteContents));
   }
 
+  // --- Mixamo tab -----------------------------------------------------
+  // A second hosted site on its own persistent session (Adobe ID login
+  // survives restarts, like the Hunyuan login does). Hidden until the
+  // nav bar's Mixamo tab is picked; layoutViews owns visibility.
+  mixamoView = new WebContentsView({
+    webPreferences: {
+      session: mixamoSes,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  mixamoView.webContents.setUserAgent(CHROME_UA);
+  mixamoView.webContents.loadURL(MIXAMO_URL);
+  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS);
+  mixamoView.webContents.on('did-navigate', pushNavState);
+  mixamoView.webContents.on('did-navigate-in-page', pushNavState);
+  mixamoView.webContents.on('did-finish-load', () => {
+    if (settings.zoomFactor && settings.zoomFactor !== 1) {
+      try {
+        mixamoView.webContents.setZoomFactor(settings.zoomFactor);
+      } catch {
+        /* view going away — ignore */
+      }
+    }
+    pushNavState();
+  });
+  mixamoView.webContents.on('zoom-changed', pushNavState);
+  mixamoView.setVisible(false);
+
   win.contentView.addChildView(navView);
   win.contentView.addChildView(sidebarView);
   win.contentView.addChildView(siteView);
+  win.contentView.addChildView(mixamoView);
 
   layoutViews();
   win.on('resize', layoutViews);
@@ -920,6 +983,7 @@ function createMainWindow() {
     navView = null;
     sidebarView = null;
     siteView = null;
+    mixamoView = null;
   });
 
   buildMenu();
@@ -975,7 +1039,19 @@ function layoutViews() {
   const below = Math.max(0, h - NAV_BAR_HEIGHT);
   if (navView) navView.setBounds({ x: 0, y: 0, width: w, height: NAV_BAR_HEIGHT });
   sidebarView.setBounds({ x: 0, y: NAV_BAR_HEIGHT, width: sidebarW, height: below });
-  siteView.setBounds({ x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: below });
+  // The two site tabs share the content rect; only the active one shows.
+  const content = { x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: below };
+  const active = activeView();
+  for (const v of [siteView, mixamoView]) {
+    if (!v) continue;
+    const isActive = v === active;
+    try {
+      v.setVisible(isActive);
+      if (isActive) v.setBounds(content);
+    } catch {
+      /* view going away — ignore */
+    }
+  }
 }
 
 /** navigationHistory is the modern API; fall back to the legacy methods. */
@@ -1007,11 +1083,12 @@ function navGo(wc, dir) {
 
 /** Enable/disable the nav bar arrows and set its zoom readout. */
 function pushNavState() {
-  if (!navView || navView.webContents.isDestroyed() || !siteView) return;
+  if (!navView || navView.webContents.isDestroyed() || !activeView()) return;
   const zoom = currentZoom();
   navView.webContents.send('nav:state', {
-    canGoBack: navCan(siteView.webContents, 'back'),
-    canGoForward: navCan(siteView.webContents, 'forward'),
+    site: activeSite,
+    canGoBack: navCan(activeView().webContents, 'back'),
+    canGoForward: navCan(activeView().webContents, 'forward'),
     zoomPct: Math.round(zoom * 100),
     canZoomIn: zoom < ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001,
     canZoomOut: zoom > ZOOM_STEPS[0] + 0.001,
@@ -1019,9 +1096,10 @@ function pushNavState() {
 }
 
 function currentZoom() {
-  if (!siteView) return 1;
+  const view = activeView();
+  if (!view) return 1;
   try {
-    return siteView.webContents.getZoomFactor();
+    return view.webContents.getZoomFactor();
   } catch {
     return 1;
   }
@@ -1029,10 +1107,11 @@ function currentZoom() {
 
 /** Set the site zoom, remember it for next launch, refresh the nav bar. */
 function applyZoom(factor) {
-  if (!siteView) return;
+  const view = activeView();
+  if (!view) return;
   const f = Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], factor));
   try {
-    siteView.webContents.setZoomFactor(f);
+    view.webContents.setZoomFactor(f);
   } catch {
     return;
   }
@@ -1156,6 +1235,63 @@ async function convertFileToTs(filePath, opts = {}) {
 
 /** True for a code file produced by glb2ts (the sniff lives in assets.js). */
 const isConvertedCodeFile = assets.isConvertedCode;
+
+/**
+ * Prepare a model for Mixamo's character upload: re-export its geometry
+ * as <name>.mixamo.obj next to the source (Mixamo accepts OBJ uploads
+ * and only needs the mesh — it adds its own skeleton and skinning). The
+ * export runs in a hidden window using the viewer's loaders; the result
+ * is tracked as an asset and revealed in Explorer so it can be dragged
+ * straight into Mixamo's upload. Returns a status message.
+ */
+async function exportForMixamo(filePath) {
+  const name = path.basename(filePath);
+  if (!fs.existsSync(filePath)) return `Prepare for Mixamo: ${name} — file not found on disk`;
+  const win = new BrowserWindow({
+    show: false,
+    width: 320,
+    height: 240,
+    webPreferences: {
+      preload: path.join(__dirname, 'viewer-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  try {
+    await win.loadFile(path.join(__dirname, 'mixamo-export.html'), { query: { file: filePath } });
+    const deadline = Date.now() + 30000;
+    let status = '';
+    while (Date.now() < deadline) {
+      status = await win.webContents.executeJavaScript('window.__exportStatus || ""').catch(() => '');
+      if (status) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (status !== 'ok') {
+      const err = await win.webContents.executeJavaScript('window.__exportError || null').catch(() => null);
+      return `Prepare for Mixamo failed (${name}): ${err || 'timed out'}`;
+    }
+    const objText = await win.webContents.executeJavaScript('window.__exportObj');
+    const outPath = path.join(path.dirname(filePath), path.basename(filePath, path.extname(filePath)) + '.mixamo.obj');
+    fs.writeFileSync(outPath, objText);
+    assets.track(outPath);
+    notifySidebar();
+    shell.showItemInFolder(outPath);
+    return `Saved ${path.basename(outPath)} — upload it in the Mixamo tab (Upload Character)`;
+  } catch (err) {
+    return `Prepare for Mixamo failed (${name}): ${String(err && err.message ? err.message : err)}`;
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+async function prepareLastDownloadForMixamo() {
+  if (!lastDownloadPath || !fs.existsSync(lastDownloadPath)) {
+    pushSidebarStatus('Prepare for Mixamo: no download yet this session');
+    return;
+  }
+  pushSidebarStatus(await exportForMixamo(lastDownloadPath));
+}
 
 async function convertLastDownloadToTs(mode) {
   const win = focusedWindow();
@@ -2095,6 +2231,10 @@ function buildMenu() {
             { label: 'Tiny (half + 512px + JPEG textures)', click: () => convertLastDownloadToTs('tiny') },
           ],
         },
+        {
+          label: 'Prepare last download for Mixamo upload',
+          click: () => prepareLastDownloadForMixamo(),
+        },
         { label: 'Open MeshCoder config', click: () => openMeshcoderConfig() },
         { label: 'Detect MeshCoder automatically', click: () => detectMeshcoder() },
         { label: 'Set up MeshCoder automatically…', click: () => openSetupWindow() },
@@ -2107,25 +2247,29 @@ function buildMenu() {
 
 /** IPC surface used by the sidebar and nav bar renderers. */
 function registerIpc() {
-  // Top navigation bar: back / forward / reload for the site view.
+  // Top navigation bar: back / forward / reload for the active site tab.
   ipcMain.on('nav:back', () => {
-    if (siteView) {
-      navGo(siteView.webContents, 'back');
+    const view = activeView();
+    if (view) {
+      navGo(view.webContents, 'back');
       pushNavState();
     }
   });
   ipcMain.on('nav:forward', () => {
-    if (siteView) {
-      navGo(siteView.webContents, 'forward');
+    const view = activeView();
+    if (view) {
+      navGo(view.webContents, 'forward');
       pushNavState();
     }
   });
   ipcMain.on('nav:reload', () => {
-    if (siteView) siteView.webContents.reload();
+    const view = activeView();
+    if (view) view.webContents.reload();
   });
   ipcMain.on('nav:zoomIn', () => stepZoom(1));
   ipcMain.on('nav:zoomOut', () => stepZoom(-1));
   ipcMain.on('nav:zoomReset', () => applyZoom(1));
+  ipcMain.on('nav:switchSite', (_e, name) => setActiveSite(name));
 
   ipcMain.handle('assets:list', (_e, workspaceId) => {
     const list = assets.list(workspaceId || null);
@@ -2247,6 +2391,12 @@ function registerIpc() {
           { label: 'Smallest (half + 1024px)', click: convert({ simplify: 0.5, textureSize: 1024 }) },
           { label: 'Tiny (half + 512px + JPEG textures)', click: convert({ simplify: 0.5, textureSize: 512, jpegTextures: true }) },
         ],
+      });
+      items.push({
+        label: 'Prepare for Mixamo upload',
+        click: () => {
+          exportForMixamo(found.filePath).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
       });
     }
     items.push(

@@ -24,7 +24,10 @@ MeshCoder to turn meshes into editable Blender Python code.
 | `glb2ts.mjs` | Model → self-contained TypeScript module (Three.js runtime rebuild, textures embedded) |
 | `mesh-to-npz.py` | Samples a mesh into a point cloud for MeshCoder |
 | `sidebar.html` / `sidebar.js` / `sidebar-preload.js` / `sidebar.css` | Left asset sidebar UI |
+| `mixamo-export.html` / `mixamo-export.js` | Hidden worker page: re-export a model's geometry as OBJ for Mixamo's character upload |
 | `package.json` | Scripts: `npm start`, `npm run package-win` |
+
+The content area hosts two site tabs, switched from the nav bar: Hunyuan3D (`persist:hunyuan3d`) and Mixamo (`persist:mixamo`, its own Adobe ID login). Downloads from either session land in the active workspace and are tracked as assets. "Prepare for Mixamo upload" (asset context menu / Tools) writes `<name>.mixamo.obj` next to the model; the viewer plays animation clips carried by FBX/GLB files (Mixamo downloads) with a play/pause + clip-picker bar.
 
 ## Conventions
 

@@ -40,7 +40,6 @@ controls.enableDamping = true;
 controls.autoRotateSpeed = 1.5;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x30303a, 1.2));
-const hemiLight = scene.children.find((c) => c.isHemisphereLight);
 const keyLight = new THREE.DirectionalLight(0xffffff, 2);
 keyLight.position.set(5, 8, 5);
 scene.add(keyLight);
@@ -53,29 +52,6 @@ scene.add(grid);
 
 let model = null;
 let wireframeOn = false;
-let darkTheme = true;
-let ambientIntensity = darkTheme ? 1.0 : 3.0;
-let parts = []; // { name, mesh, visible }
-let highlightedPart = null;
-
-function setTheme(dark) {
-  darkTheme = dark;
-  document.body.dataset.theme = dark ? 'dark' : 'light';
-  scene.background = new THREE.Color(dark ? 0x14161b : 0x8c929c);
-  fillLight.intensity = dark ? 0.6 : 1;
-  keyLight.intensity = dark ? 2 : 1.4;
-}
-
-function setAmbient(delta) {
-  ambientIntensity = Math.min(15, Math.max(0, ambientIntensity + delta));
-  hemiLight.intensity = ambientIntensity;
-  updateAmbientLabel();
-  setStatus(`Ambient light: ${ambientIntensity.toFixed(1)}`);
-}
-
-function updateAmbientLabel() {
-  document.getElementById('ambientLabel').textContent = `Ambient ${ambientIntensity.toFixed(1)}`;
-}
 
 function setWireframe(root, on) {
   root.traverse((obj) => {
@@ -143,121 +119,64 @@ function fitCamera(root) {
   grid.position.y = box.min.y - center.y - 0.001;
 }
 
-function showObject(obj) {
+// Animation playback (FBX and GLB files can carry clips — Mixamo
+// downloads always do). A mixer over the loaded object; the render loop
+// below advances it while it plays.
+let mixer = null;
+let action = null;
+let modelClips = [];
+const animBar = document.getElementById('animbar');
+const animPlayBtn = document.getElementById('anim-play');
+const animClipSel = document.getElementById('anim-clip');
+const animTimeEl = document.getElementById('anim-time');
+const animClock = new THREE.Clock();
+
+function playClip(index) {
+  if (!mixer || !modelClips.length) return;
+  if (action) action.stop();
+  action = mixer.clipAction(modelClips[index]);
+  action.reset().play();
+  animPlayBtn.innerHTML = '&#10074;&#10074;';
+  animTimeEl.textContent = `0.0s / ${modelClips[index].duration.toFixed(1)}s`;
+}
+
+animPlayBtn.addEventListener('click', () => {
+  if (!action) return;
+  action.paused = !action.paused;
+  animPlayBtn.innerHTML = action.paused ? '&#9654;' : '&#10074;&#10074;';
+});
+animClipSel.addEventListener('change', () => playClip(Number(animClipSel.value)));
+
+function showObject(obj, anims) {
   if (model) scene.remove(model);
-  if (highlightedPart) {
-    unhighlightPart(highlightedPart);
-    highlightedPart = null;
+  if (mixer) {
+    mixer.stopAllAction();
+    mixer = null;
+    action = null;
   }
+  modelClips = Array.isArray(anims) ? anims : [];
   model = obj;
   scene.add(obj);
   fitCamera(obj);
-  setStatus('Loaded — drag to orbit, scroll to zoom, right-drag to pan');
-  window.__viewerStatus = 'ok';
-  collectParts(obj);
-}
-
-function collectParts(root) {
-  parts = [];
-  root.traverse((obj) => {
-    if (obj.isMesh) {
-      parts.push({
-        name: obj.name || `Part ${parts.length + 1}`,
-        mesh: obj,
-        visible: obj.visible,
-      });
-    }
-  });
-  renderPartsList();
-}
-
-function renderPartsList() {
-  const list = document.getElementById('partsList');
-  const count = document.getElementById('partsCount');
-  const btn = document.getElementById('parts');
-  list.innerHTML = '';
-  count.textContent = `(${parts.length})`;
-  btn.textContent = parts.length ? `Parts (${parts.length})` : 'Parts';
-  if (!parts.length) {
-    list.textContent = 'No parts';
-    return;
-  }
-  parts.forEach((p) => {
-    const row = document.createElement('div');
-    row.className = 'part-row' + (highlightedPart === p ? ' highlighted' : '');
-
-    const vis = document.createElement('span');
-    vis.className = 'part-vis' + (p.visible ? '' : ' hidden');
-    vis.textContent = '👁';
-    vis.title = 'Toggle visibility';
-
-    const name = document.createElement('span');
-    name.className = 'part-name' + (p.visible ? '' : ' hidden');
-    name.textContent = p.name;
-    name.title = p.name;
-
-    row.appendChild(vis);
-    row.appendChild(name);
-
-    vis.addEventListener('click', (e) => {
-      e.stopPropagation();
-      p.visible = !p.visible;
-      p.mesh.visible = p.visible;
-      vis.className = 'part-vis' + (p.visible ? '' : ' hidden');
-      name.className = 'part-name' + (p.visible ? '' : ' hidden');
+  if (modelClips.length) {
+    mixer = new THREE.AnimationMixer(obj);
+    animClipSel.innerHTML = '';
+    modelClips.forEach((clip, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = clip.name || `Clip ${i + 1}`;
+      animClipSel.appendChild(opt);
     });
-
-    name.addEventListener('click', (e) => {
-      e.stopPropagation();
-      highlightPart(p);
-    });
-
-    list.appendChild(row);
-  });
-}
-
-function highlightPart(p) {
-  if (highlightedPart === p) {
-    unhighlightPart(p);
-    highlightedPart = null;
+    animBar.hidden = false;
+    playClip(0);
+    window.__viewerAnim = { clips: modelClips.length, playing: true };
+    setStatus(`Loaded — playing animation (${modelClips.length} clip${modelClips.length === 1 ? '' : 's'})`);
   } else {
-    if (highlightedPart) unhighlightPart(highlightedPart);
-    applyHighlight(p);
-    highlightedPart = p;
+    animBar.hidden = true;
+    window.__viewerAnim = null;
+    setStatus('Loaded — drag to orbit, scroll to zoom, right-drag to pan');
   }
-  renderPartsList();
-  setStatus(highlightedPart ? `Highlighted: ${p.name}` : 'Selection cleared');
-}
-
-function applyHighlight(p) {
-  p.mesh.traverse((obj) => {
-    if (!obj.isMesh || !obj.material) return;
-    // Clone materials so shared materials aren't affected
-    const origMats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    const newMats = origMats.map((m) => {
-      const clone = m.clone();
-      if (clone.emissive) {
-        clone.emissive.set(0x4c8dff);
-        clone.emissiveIntensity = 0.6;
-      } else if (clone.color) {
-        clone.color.set(0x4c8dff);
-      }
-      clone.needsUpdate = true;
-      return clone;
-    });
-    obj.__origMaterial = obj.material;
-    obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
-  });
-}
-
-function unhighlightPart(p) {
-  p.mesh.traverse((obj) => {
-    if (!obj.isMesh || !obj.material) return;
-    if (obj.__origMaterial) {
-      obj.material = obj.__origMaterial;
-      delete obj.__origMaterial;
-    }
-  });
+  window.__viewerStatus = 'ok';
 }
 
 function showError(err) {
@@ -313,7 +232,7 @@ async function load() {
       new GLTFLoader().parse(
         input,
         '',
-        (gltf) => showObject(gltf.scene),
+        (gltf) => showObject(gltf.scene, gltf.animations),
         (e) => showError(e)
       );
     } else if (ext === 'obj') {
@@ -334,7 +253,8 @@ async function load() {
       }
       showObject(obj);
     } else if (ext === 'fbx') {
-      showObject(new FBXLoader().parse(data, ''));
+      const fbx = new FBXLoader().parse(data, '');
+      showObject(fbx, fbx.animations);
     } else {
       showError('unsupported format: .' + ext);
     }
@@ -361,21 +281,6 @@ document.getElementById('grid').addEventListener('click', (e) => {
   grid.visible = !grid.visible;
   e.currentTarget.classList.toggle('active', grid.visible);
 });
-document.getElementById('parts').addEventListener('click', (e) => {
-  const panel = document.getElementById('partsPanel');
-  panel.classList.toggle('open');
-  e.currentTarget.classList.toggle('active', panel.classList.contains('open'));
-});
-document.getElementById('theme').addEventListener('click', (e) => {
-  setTheme(!darkTheme);
-  e.currentTarget.classList.toggle('active', !darkTheme);
-});
-document.getElementById('ambientDown').addEventListener('click', () => {
-  setAmbient(-1);
-});
-document.getElementById('ambientUp').addEventListener('click', () => {
-  setAmbient(1);
-});
 document.getElementById('reset').addEventListener('click', () => {
   if (model) fitCamera(model);
 });
@@ -390,6 +295,12 @@ window.addEventListener('resize', () => {
 
 function animate() {
   requestAnimationFrame(animate);
+  const dt = animClock.getDelta();
+  if (mixer && action && !action.paused) {
+    mixer.update(dt);
+    animTimeEl.textContent = `${action.time.toFixed(1)}s / ${modelClips[Number(animClipSel.value)].duration.toFixed(1)}s`;
+    if (window.__viewerAnim) window.__viewerAnim.time = action.time;
+  }
   controls.update();
   renderer.render(scene, camera);
 }

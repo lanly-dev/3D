@@ -6,6 +6,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('navApi', {
+  switchSite: (name) => ipcRenderer.send('nav:switchSite', name),
   back: () => ipcRenderer.send('nav:back'),
   forward: () => ipcRenderer.send('nav:forward'),
   reload: () => ipcRenderer.send('nav:reload'),

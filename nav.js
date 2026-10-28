@@ -17,10 +17,19 @@ zoomOutBtn.addEventListener('click', () => bridge.zoomOut());
 zoomInBtn.addEventListener('click', () => bridge.zoomIn());
 zoomResetBtn.addEventListener('click', () => bridge.zoomReset());
 
+const tabHunyuan = document.getElementById('tab-hunyuan');
+const tabMixamo = document.getElementById('tab-mixamo');
+tabHunyuan.addEventListener('click', () => bridge.switchSite('hunyuan'));
+tabMixamo.addEventListener('click', () => bridge.switchSite('mixamo'));
+
 backBtn.disabled = true;
 forwardBtn.disabled = true;
 
 bridge.onState((state) => {
+  if (state.site) {
+    tabHunyuan.classList.toggle('active', state.site === 'hunyuan');
+    tabMixamo.classList.toggle('active', state.site === 'mixamo');
+  }
   backBtn.disabled = !state.canGoBack;
   forwardBtn.disabled = !state.canGoForward;
   if (typeof state.zoomPct === 'number') {
