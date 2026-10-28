@@ -118,3 +118,16 @@ html, body {
   bottom: 0;
 }
 #viewport canvas { display: block; }
+
+/* Scrollbars: transparent track, thin translucent thumb — the default
+   Windows bars are thick and bright against the dark UI. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .16);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .3); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }

@@ -222,6 +222,11 @@ const settings = loadSettings();
 if (settings.translateToEnglish) {
   app.commandLine.appendSwitch('lang', 'en-US');
 }
+// Overlay scrollbars everywhere (including the hosted sites): they float
+// translucently over the content instead of the thick, bright default
+// Windows bars. The app's own pages also style theirs in CSS, so they
+// stay subtle even where this flag has no effect.
+app.commandLine.appendSwitch('enable-features', 'OverlayScrollbar,FluentOverlayScrollbar');
 
 function toggleTranslate() {
   const s = loadSettings();

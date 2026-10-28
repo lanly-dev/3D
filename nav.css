@@ -33,19 +33,6 @@ body {
 
 /* Site tabs (Hunyuan3D / Mixamo) sit on the left; the rest stays right. */
 .site-tabs { margin-right: auto; }
-.tab {
-  width: auto;
-  padding: 0 12px;
-  font-size: 12.5px;
-  color: var(--fg-dim);
-}
-.tab:hover { color: var(--fg); }
-.tab.active {
-  background: var(--bg-3);
-  border-color: var(--line);
-  color: var(--fg);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
 
 .nav-sep { width: 1px; height: 18px; background: var(--line); margin: 0 7px; }
 
@@ -70,3 +57,22 @@ body {
 .nav-btn:active { background: var(--bg-3); color: var(--accent); }
 .nav-btn:disabled { color: var(--fg-dim); opacity: .45; cursor: default; }
 .nav-btn:disabled:hover { background: transparent; border-color: transparent; }
+
+/* Site tab buttons: text-width, never clipped. These rules must stay
+   AFTER .nav-btn (same specificity, later wins) or the labels collapse
+   to the 30px icon-button width and overflow. */
+.nav-btn.tab {
+  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 12px;
+  font-size: 12.5px;
+  color: var(--fg-dim);
+}
+.nav-btn.tab:hover { color: var(--fg); }
+.nav-btn.tab.active {
+  background: var(--bg-3);
+  border-color: var(--line);
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
