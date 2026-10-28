@@ -608,6 +608,30 @@ function isInApp(url, hosts = IN_APP_HOSTS) {
   }
 }
 
+/**
+ * Scrollbar styling for hosted site pages. The app's own pages style
+ * theirs in CSS; a hosted page (Hunyuan/Mixamo) keeps its default thick
+ * bars unless the host injects the style — webContents.insertCSS is the
+ * supported way, re-applied on every full load. Neutral grey, so it reads
+ * on light and dark pages alike.
+ */
+const SCROLLBAR_CSS = `
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45); border: 3px solid transparent; background-clip: padding-box; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75); background-clip: padding-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+`;
+
+function injectScrollbarStyle(contents) {
+  const apply = () => {
+    contents.insertCSS(SCROLLBAR_CSS).catch(() => {});
+  };
+  contents.on('did-finish-load', apply);
+  // window.open children (login flows) get the same treatment.
+  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents));
+}
+
 function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
   contents.setWindowOpenHandler(({ url }) => {
     if (isInApp(url, hosts)) {
@@ -621,6 +645,7 @@ function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
       child.webContents.setUserAgent(CHROME_UA);
       child.loadURL(url);
       applyWindowOpenHandler(child.webContents, hosts);
+      injectScrollbarStyle(child.webContents);
       return { action: 'deny' };
     }
     shell.openExternal(url).catch(() => {});
@@ -918,6 +943,7 @@ function createMainWindow() {
   siteView.webContents.setUserAgent(CHROME_UA);
   siteView.webContents.loadURL(HOME_URL);
   applyWindowOpenHandler(siteView.webContents);
+  injectScrollbarStyle(siteView.webContents);
   // Keep the nav bar's back/forward arrows in sync with the site history.
   siteView.webContents.on('did-navigate', pushNavState);
   siteView.webContents.on('did-navigate-in-page', pushNavState);
@@ -958,6 +984,7 @@ function createMainWindow() {
   mixamoView.webContents.setUserAgent(CHROME_UA);
   mixamoView.webContents.loadURL(MIXAMO_URL);
   applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS);
+  injectScrollbarStyle(mixamoView.webContents);
   mixamoView.webContents.on('did-navigate', pushNavState);
   mixamoView.webContents.on('did-navigate-in-page', pushNavState);
   mixamoView.webContents.on('did-finish-load', () => {
@@ -2600,7 +2627,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle };
 
 /**
  * True when this file is the app's entry point.
