@@ -537,9 +537,22 @@ const SCROLLBAR_CSS = `
   ::-webkit-scrollbar-corner { background: transparent !important; }
 `;
 
-function injectScrollbarStyle(contents) {
+/**
+ * Mixamo-only variant (Lan's ask): the scrollbar is fully transparent —
+ * zero-size, invisible — while wheel / touch / keyboard scrolling keeps
+ * working.
+ */
+const MIXAMO_SCROLLBAR_CSS = `
+  * { scrollbar-width: none !important; scrollbar-color: transparent transparent !important; }
+  ::-webkit-scrollbar { width: 0 !important; height: 0 !important; background: transparent !important; }
+  ::-webkit-scrollbar-track { background: transparent !important; }
+  ::-webkit-scrollbar-thumb { background: transparent !important; }
+  ::-webkit-scrollbar-corner { background: transparent !important; }
+`;
+
+function injectScrollbarStyle(contents, css = SCROLLBAR_CSS) {
   const apply = () => {
-    contents.insertCSS(SCROLLBAR_CSS).catch(() => {});
+    contents.insertCSS(css).catch(() => {});
   };
   // dom-ready covers pages whose full load event lags behind slow media;
   // did-finish-load re-asserts it afterwards. Identical rules, so a
@@ -565,17 +578,17 @@ function injectScrollbarStyle(contents) {
           if (document.getElementById('__app_scrollbar_style')) return;
           const s = document.createElement('style');
           s.id = '__app_scrollbar_style';
-          s.textContent = ${JSON.stringify(SCROLLBAR_CSS)};
+          s.textContent = ${JSON.stringify(css)};
           (document.head || document.documentElement).appendChild(s);
         })()`
       )
       .catch(() => {});
   });
   // window.open children (login flows) get the same treatment.
-  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents));
+  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents, css));
 }
 
-function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
+function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = SCROLLBAR_CSS) {
   contents.setWindowOpenHandler(({ url }) => {
     if (isInApp(url, hosts)) {
       // A WebContentsView cannot open a child window directly — create it.
@@ -587,8 +600,8 @@ function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
       const child = new BrowserWindow(childWindowOptions(contents.session));
       child.webContents.setUserAgent(CHROME_UA);
       child.loadURL(url);
-      applyWindowOpenHandler(child.webContents, hosts);
-      injectScrollbarStyle(child.webContents);
+      applyWindowOpenHandler(child.webContents, hosts, css);
+      injectScrollbarStyle(child.webContents, css);
       return { action: 'deny' };
     }
     shell.openExternal(url).catch(() => {});
@@ -930,8 +943,8 @@ function createMainWindow() {
   });
   mixamoView.webContents.setUserAgent(CHROME_UA);
   mixamoView.webContents.loadURL(MIXAMO_URL);
-  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS);
-  injectScrollbarStyle(mixamoView.webContents);
+  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS, MIXAMO_SCROLLBAR_CSS);
+  injectScrollbarStyle(mixamoView.webContents, MIXAMO_SCROLLBAR_CSS);
   attachWebContextMenu(mixamoView.webContents);
   mixamoView.webContents.on('did-navigate', pushNavState);
   mixamoView.webContents.on('did-navigate-in-page', pushNavState);
@@ -2085,7 +2098,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
 
 /**
  * True when this file is the app's entry point.
