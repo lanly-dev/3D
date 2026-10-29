@@ -29,6 +29,7 @@ const {
   BrowserWindow,
   WebContentsView,
   webContents,
+  webFrameMain,
   session,
   Menu,
   shell,
@@ -638,6 +639,31 @@ function injectScrollbarStyle(contents) {
   // second insert is harmless.
   contents.on('dom-ready', apply);
   contents.on('did-finish-load', apply);
+  // insertCSS only reaches the MAIN frame — a page whose scroller lives
+  // in an iframe (Mixamo's app shell does this) keeps its default white
+  // bars there. Subframes get the same rules as a <style> element,
+  // re-applied on every frame load.
+  contents.on('did-frame-finish-load', (_e, isMainFrame, processId, routingId) => {
+    if (isMainFrame) return;
+    let frame = null;
+    try {
+      frame = webFrameMain.fromId(processId, routingId);
+    } catch {
+      frame = null;
+    }
+    if (!frame) return;
+    frame
+      .executeJavaScript(
+        `(() => {
+          if (document.getElementById('__app_scrollbar_style')) return;
+          const s = document.createElement('style');
+          s.id = '__app_scrollbar_style';
+          s.textContent = ${JSON.stringify(SCROLLBAR_CSS)};
+          (document.head || document.documentElement).appendChild(s);
+        })()`
+      )
+      .catch(() => {});
+  });
   // window.open children (login flows) get the same treatment.
   contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents));
 }
