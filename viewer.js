@@ -40,6 +40,7 @@ controls.enableDamping = true;
 controls.autoRotateSpeed = 1.5;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x30303a, 1.2));
+const hemiLight = scene.children.find((c) => c.isHemisphereLight);
 const keyLight = new THREE.DirectionalLight(0xffffff, 2);
 keyLight.position.set(5, 8, 5);
 scene.add(keyLight);
@@ -52,6 +53,29 @@ scene.add(grid);
 
 let model = null;
 let wireframeOn = false;
+let darkTheme = true;
+let ambientIntensity = darkTheme ? 1.0 : 3.0;
+let parts = []; // { name, mesh, visible }
+let highlightedPart = null;
+
+function setTheme(dark) {
+  darkTheme = dark;
+  document.body.dataset.theme = dark ? 'dark' : 'light';
+  scene.background = new THREE.Color(dark ? 0x14161b : 0x8c929c);
+  fillLight.intensity = dark ? 0.6 : 1;
+  keyLight.intensity = dark ? 2 : 1.4;
+}
+
+function setAmbient(delta) {
+  ambientIntensity = Math.min(15, Math.max(0, ambientIntensity + delta));
+  hemiLight.intensity = ambientIntensity;
+  updateAmbientLabel();
+  setStatus(`Ambient light: ${ambientIntensity.toFixed(1)}`);
+}
+
+function updateAmbientLabel() {
+  document.getElementById('ambientLabel').textContent = `Ambient ${ambientIntensity.toFixed(1)}`;
+}
 
 function setWireframe(root, on) {
   root.traverse((obj) => {
@@ -149,6 +173,10 @@ animClipSel.addEventListener('change', () => playClip(Number(animClipSel.value))
 
 function showObject(obj, anims) {
   if (model) scene.remove(model);
+  if (highlightedPart) {
+    unhighlightPart(highlightedPart);
+    highlightedPart = null;
+  }
   if (mixer) {
     mixer.stopAllAction();
     mixer = null;
@@ -158,6 +186,8 @@ function showObject(obj, anims) {
   model = obj;
   scene.add(obj);
   fitCamera(obj);
+  window.__viewerStatus = 'ok';
+  collectParts(obj);
   if (modelClips.length) {
     mixer = new THREE.AnimationMixer(obj);
     animClipSel.innerHTML = '';
@@ -176,7 +206,109 @@ function showObject(obj, anims) {
     window.__viewerAnim = null;
     setStatus('Loaded — drag to orbit, scroll to zoom, right-drag to pan');
   }
-  window.__viewerStatus = 'ok';
+}
+
+function collectParts(root) {
+  parts = [];
+  root.traverse((obj) => {
+    if (obj.isMesh) {
+      parts.push({
+        name: obj.name || `Part ${parts.length + 1}`,
+        mesh: obj,
+        visible: obj.visible,
+      });
+    }
+  });
+  renderPartsList();
+}
+
+function renderPartsList() {
+  const list = document.getElementById('partsList');
+  const count = document.getElementById('partsCount');
+  const btn = document.getElementById('parts');
+  list.innerHTML = '';
+  count.textContent = `(${parts.length})`;
+  btn.textContent = parts.length ? `Parts (${parts.length})` : 'Parts';
+  if (!parts.length) {
+    list.textContent = 'No parts';
+    return;
+  }
+  parts.forEach((p) => {
+    const row = document.createElement('div');
+    row.className = 'part-row' + (highlightedPart === p ? ' highlighted' : '');
+
+    const vis = document.createElement('span');
+    vis.className = 'part-vis' + (p.visible ? '' : ' hidden');
+    vis.textContent = '👁';
+    vis.title = 'Toggle visibility';
+
+    const name = document.createElement('span');
+    name.className = 'part-name' + (p.visible ? '' : ' hidden');
+    name.textContent = p.name;
+    name.title = p.name;
+
+    row.appendChild(vis);
+    row.appendChild(name);
+
+    vis.addEventListener('click', (e) => {
+      e.stopPropagation();
+      p.visible = !p.visible;
+      p.mesh.visible = p.visible;
+      vis.className = 'part-vis' + (p.visible ? '' : ' hidden');
+      name.className = 'part-name' + (p.visible ? '' : ' hidden');
+    });
+
+    name.addEventListener('click', (e) => {
+      e.stopPropagation();
+      highlightPart(p);
+    });
+
+    list.appendChild(row);
+  });
+}
+
+function highlightPart(p) {
+  if (highlightedPart === p) {
+    unhighlightPart(p);
+    highlightedPart = null;
+  } else {
+    if (highlightedPart) unhighlightPart(highlightedPart);
+    applyHighlight(p);
+    highlightedPart = p;
+  }
+  renderPartsList();
+  setStatus(highlightedPart ? `Highlighted: ${p.name}` : 'Selection cleared');
+}
+
+function applyHighlight(p) {
+  p.mesh.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    // Clone materials so shared materials aren't affected
+    const origMats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    const newMats = origMats.map((m) => {
+      const clone = m.clone();
+      if (clone.emissive) {
+        clone.emissive.set(0x4c8dff);
+        clone.emissiveIntensity = 0.6;
+      } else if (clone.color) {
+        clone.color.set(0x4c8dff);
+      }
+      clone.needsUpdate = true;
+      return clone;
+    });
+    obj.__origMaterial = obj.material;
+    obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
+  });
+}
+
+function unhighlightPart(p) {
+  p.mesh.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    if (obj.__origMaterial) {
+      obj.material = obj.__origMaterial;
+      delete obj.__origMaterial;
+    }
+  });
 }
 
 function showError(err) {
@@ -280,6 +412,21 @@ document.getElementById('rotate').addEventListener('click', (e) => {
 document.getElementById('grid').addEventListener('click', (e) => {
   grid.visible = !grid.visible;
   e.currentTarget.classList.toggle('active', grid.visible);
+});
+document.getElementById('parts').addEventListener('click', (e) => {
+  const panel = document.getElementById('partsPanel');
+  panel.classList.toggle('open');
+  e.currentTarget.classList.toggle('active', panel.classList.contains('open'));
+});
+document.getElementById('theme').addEventListener('click', (e) => {
+  setTheme(!darkTheme);
+  e.currentTarget.classList.toggle('active', !darkTheme);
+});
+document.getElementById('ambientDown').addEventListener('click', () => {
+  setAmbient(-1);
+});
+document.getElementById('ambientUp').addEventListener('click', () => {
+  setAmbient(1);
 });
 document.getElementById('reset').addEventListener('click', () => {
   if (model) fitCamera(model);
