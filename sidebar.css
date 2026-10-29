@@ -256,6 +256,8 @@ body.collapsed .grip { width: 4px; }
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 0 8px 8px;
+  /* Lets item layout react to the sidebar's own width (below). */
+  container-type: inline-size;
 }
 
 .item {
@@ -408,3 +410,26 @@ body.collapsed .grip { width: 4px; }
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .3); background-clip: padding-box; }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* Wide sidebar: when there is room, the action buttons move up onto the
+   same line as the thumbnail and info (right side, vertically centered
+   across the name + meta rows) instead of taking a second row. Below
+   the breakpoint the stacked layout above applies unchanged. */
+@container (min-width: 360px) {
+  .item-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-content: center;
+  }
+  .item-top { grid-column: 1; grid-row: 1; }
+  .item-meta { grid-column: 1; grid-row: 2; }
+  .item-actions {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    align-self: center;
+    flex-wrap: nowrap;
+    margin-top: 0;
+    margin-left: 10px;
+  }
+}
