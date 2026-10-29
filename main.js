@@ -1276,12 +1276,23 @@ function focusedWindow() {
 
 /** The web app's contents (for navigation menu items). */
 function focusedWebContents() {
+  // The contents that actually has keyboard focus — the active site tab,
+  // the sidebar/nav UI, or a popup window — so Navigate actions and
+  // Toggle DevTools apply to what the user is looking at, not always to
+  // the Hunyuan3D view.
+  try {
+    const focused = webContents.getFocusedWebContents();
+    if (focused && !focused.isDestroyed()) return focused;
+  } catch {
+    /* fall through to the fallbacks */
+  }
   const w = BrowserWindow.getFocusedWindow();
   // A login popup has focus — act on that window instead of the site view.
   if (w && w !== mainWindow && w.webContents && !w.webContents.isDestroyed()) {
     return w.webContents;
   }
-  if (siteView && !siteView.webContents.isDestroyed()) return siteView.webContents;
+  const active = activeView();
+  if (active && !active.webContents.isDestroyed()) return active.webContents;
   return w ? w.webContents : null;
 }
 
