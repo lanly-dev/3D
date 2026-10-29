@@ -8,4 +8,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('viewerApi', {
   readFile: (filePath) => ipcRenderer.invoke('viewer:readFile', filePath),
   readModule: (filePath) => ipcRenderer.invoke('viewer:readModule', filePath),
+  saveScreenshot: (arrayBuffer, baseName) =>
+    ipcRenderer.invoke('viewer:saveScreenshot', arrayBuffer, baseName),
 });

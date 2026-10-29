@@ -455,6 +455,33 @@ document.getElementById('reset').addEventListener('click', () => {
   if (model) fitCamera(model);
 });
 
+// Screenshot: render once and read the canvas in the same task (without
+// preserveDrawingBuffer the drawing buffer is only valid right after a
+// render). The main process saves the PNG into the active workspace
+// folder; the viewer's own toast confirms it.
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showViewerToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+}
+document.getElementById('screenshot').addEventListener('click', async () => {
+  try {
+    renderer.render(scene, camera);
+    const blob = await new Promise((resolve) => renderer.domElement.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('empty capture');
+    const buf = await blob.arrayBuffer();
+    const base = fileName.replace(/\.[^.]+$/, '');
+    const saved = await window.viewerApi.saveScreenshot(buf, base);
+    window.__lastShot = saved;
+    showViewerToast('Screenshot saved — ' + saved);
+  } catch {
+    showViewerToast('Screenshot failed');
+  }
+});
+
 window.addEventListener('resize', () => {
   const w = viewport.clientWidth;
   const h = viewport.clientHeight;

@@ -209,3 +209,25 @@ body[data-theme="light"] {
   max-width: 220px;
 }
 #anim-time { color: var(--fg-dim); font-size: 12px; min-width: 74px; }
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%) translateY(6px);
+  background: var(--bg-3);
+  color: var(--fg);
+  border: 1px solid rgba(127, 134, 150, 0.35);
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+  z-index: 40;
+  max-width: 80%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

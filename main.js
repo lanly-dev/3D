@@ -1157,6 +1157,7 @@ function layoutViews() {
       /* view going away — ignore */
     }
   }
+  if (toastView) positionToast();
 }
 
 /** navigationHistory is the modern API; fall back to the legacy methods. */
@@ -1397,6 +1398,12 @@ function buildWebContextMenu(contents, params) {
   return template;
 }
 
+/** Screenshots and saved images land in the active workspace folder. */
+function screenshotDir() {
+  const ws = workspaces.active();
+  return ws && ws.folder ? ws.folder : app.getPath('pictures');
+}
+
 /** Capture the visible page into the active workspace folder as a PNG. */
 async function takeScreenshot(contents) {
   try {
@@ -1408,14 +1415,13 @@ async function takeScreenshot(contents) {
     } catch {
       /* keep the generic name */
     }
-    const ws = workspaces.active();
-    const dir = ws && ws.folder ? ws.folder : app.getPath('pictures');
+    const dir = screenshotDir();
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `screenshot-${host}-${stamp}.png`);
     await fs.promises.writeFile(file, img.toPNG());
-    new Notification({ title: 'Hunyuan3D', body: `Screenshot saved: ${path.basename(file)}` }).show();
+    void showToast(`Screenshot saved — ${path.basename(file)}`);
   } catch {
-    /* capture raced a navigation — nothing useful to report */
+    void showToast('Screenshot failed — try again');
   }
 }
 
@@ -1432,12 +1438,12 @@ async function saveImageAs(contents, srcURL) {
       /* keep the generic name */
     }
     if (!path.extname(name)) name += '.png';
-    const ws = workspaces.active();
-    const dir = ws && ws.folder ? ws.folder : app.getPath('pictures');
+    const dir = screenshotDir();
     const win = BrowserWindow.fromWebContents(contents) || mainWindow;
     const picked = await dialog.showSaveDialog(win, { defaultPath: path.join(dir, name) });
     if (picked.canceled || !picked.filePath) return;
     await fs.promises.writeFile(picked.filePath, buf);
+    void showToast(`Image saved — ${path.basename(picked.filePath)}`);
   } catch {
     /* offline / blocked image — leave the page as-is */
   }
@@ -1454,6 +1460,73 @@ function attachWebContextMenu(contents) {
   });
   // Popup windows (login flows) get the same menu.
   contents.on('did-create-window', (child) => attachWebContextMenu(child.webContents));
+}
+
+// --- In-app toast ------------------------------------------------------------
+// OS notifications are easy to miss (quiet hours, focus assist), so short
+// confirmations like "Screenshot saved" also show as a toast pill at the
+// bottom of the window. The toast is a transparent overlay view, visible
+// only while a message is up.
+let toastView = null;
+let toastTimer = null;
+let toastReady = null;
+
+function toastHostWindow() {
+  return mainWindow || BrowserWindow.getAllWindows()[0] || null;
+}
+
+function ensureToastView() {
+  if (toastView && !toastView.webContents.isDestroyed()) return toastView;
+  const win = toastHostWindow();
+  if (!win) return null;
+  toastView = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  toastView.setBackgroundColor('#00000000');
+  win.contentView.addChildView(toastView);
+  toastView.setVisible(false);
+  toastReady = new Promise((resolve) => {
+    toastView.webContents.once('did-finish-load', resolve);
+  });
+  toastView.webContents.loadFile(path.join(__dirname, 'toast.html')).catch(() => {});
+  positionToast();
+  return toastView;
+}
+
+function positionToast() {
+  const win = toastHostWindow();
+  if (!toastView || !win) return;
+  const { width: w, height: h } = win.getContentBounds();
+  const width = Math.min(560, Math.max(0, w - 32));
+  toastView.setBounds({
+    x: Math.round((w - width) / 2),
+    y: Math.max(0, h - 62),
+    width,
+    height: 44,
+  });
+}
+
+async function showToast(message) {
+  const view = ensureToastView();
+  if (!view) return;
+  positionToast();
+  view.setVisible(true);
+  try {
+    await toastReady;
+    await view.webContents.executeJavaScript(
+      `window.showToast && window.showToast(${JSON.stringify(String(message))})`
+    );
+  } catch {
+    /* toast page unavailable — the pill still appears on the next call */
+  }
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    if (toastView) toastView.setVisible(false);
+  }, 2800);
+}
+
+function toastViewState() {
+  return { exists: !!toastView, visible: toastView ? toastView.getVisible() : false };
 }
 
 // --- Three.js code conversion (glb2ts) -------------------------------------
@@ -2762,6 +2835,23 @@ function registerIpc() {
     const buf = fs.readFileSync(p);
     return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   });
+  // Save a viewer screenshot PNG into the active workspace folder;
+  // returns the file's basename for the viewer's toast.
+  ipcMain.handle('viewer:saveScreenshot', (_e, data, baseName) => {
+    const dir = screenshotDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safe =
+      String(baseName || 'model').replace(/[\\/:*?"<>|]/g, '_').replace(/\.[^.]*$/, '') || 'model';
+    let target = path.join(dir, `${safe}-view-${stamp}.png`);
+    let n = 1;
+    while (fs.existsSync(target)) {
+      target = path.join(dir, `${safe}-view-${stamp} (${n}).png`);
+      n += 1;
+    }
+    fs.writeFileSync(target, Buffer.from(data));
+    return path.basename(target);
+  });
   // Rename an asset's file in place, then refresh the sidebar.
   ipcMain.handle('assets:rename', (_e, id, newName) => {
     const res = assets.rename(String(id || ''), String(newName || ''));
@@ -2868,7 +2958,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, toggleFocusedDevTools, buildWebContextMenu };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
 
 /**
  * True when this file is the app's entry point.
