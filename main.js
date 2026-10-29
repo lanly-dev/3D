@@ -621,17 +621,22 @@ function isInApp(url, hosts = IN_APP_HOSTS) {
  * on light and dark pages alike.
  */
 const SCROLLBAR_CSS = `
-  ::-webkit-scrollbar { width: 10px; height: 10px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45); border: 3px solid transparent; background-clip: padding-box; border-radius: 6px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75); background-clip: padding-box; }
-  ::-webkit-scrollbar-corner { background: transparent; }
+  html { scrollbar-width: thin !important; scrollbar-color: rgba(125, 130, 145, .45) transparent !important; }
+  ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
+  ::-webkit-scrollbar-track { background: transparent !important; }
+  ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45) !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 6px !important; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75) !important; background-clip: padding-box !important; }
+  ::-webkit-scrollbar-corner { background: transparent !important; }
 `;
 
 function injectScrollbarStyle(contents) {
   const apply = () => {
     contents.insertCSS(SCROLLBAR_CSS).catch(() => {});
   };
+  // dom-ready covers pages whose full load event lags behind slow media;
+  // did-finish-load re-asserts it afterwards. Identical rules, so a
+  // second insert is harmless.
+  contents.on('dom-ready', apply);
   contents.on('did-finish-load', apply);
   // window.open children (login flows) get the same treatment.
   contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents));
