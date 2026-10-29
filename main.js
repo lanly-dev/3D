@@ -983,6 +983,7 @@ function createMainWindow() {
   siteView.webContents.loadURL(HOME_URL);
   applyWindowOpenHandler(siteView.webContents);
   injectScrollbarStyle(siteView.webContents);
+  attachWebContextMenu(siteView.webContents);
   // Keep the nav bar's back/forward arrows in sync with the site history.
   siteView.webContents.on('did-navigate', pushNavState);
   siteView.webContents.on('did-navigate-in-page', pushNavState);
@@ -1024,6 +1025,7 @@ function createMainWindow() {
   mixamoView.webContents.loadURL(MIXAMO_URL);
   applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS);
   injectScrollbarStyle(mixamoView.webContents);
+  attachWebContextMenu(mixamoView.webContents);
   mixamoView.webContents.on('did-navigate', pushNavState);
   mixamoView.webContents.on('did-navigate-in-page', pushNavState);
   mixamoView.webContents.on('did-finish-load', () => {
@@ -1053,6 +1055,7 @@ function createMainWindow() {
   pizzaView.webContents.loadURL(POLYPIZZA_URL);
   applyWindowOpenHandler(pizzaView.webContents, POLYPIZZA_IN_APP_HOSTS);
   injectScrollbarStyle(pizzaView.webContents);
+  attachWebContextMenu(pizzaView.webContents);
   pizzaView.webContents.on('did-navigate', pushNavState);
   pizzaView.webContents.on('did-navigate-in-page', pushNavState);
   pizzaView.webContents.on('did-finish-load', () => {
@@ -1302,14 +1305,9 @@ function focusedWebContents() {
  * (seen on the Mixamo / Poly Pizza tabs), so after opening, its window
  * is pulled to the front as soon as it exists.
  */
-function toggleFocusedDevTools() {
-  const wc = focusedWebContents();
-  if (!wc) return;
-  if (wc.isDevToolsOpened()) {
-    wc.closeDevTools();
-    return;
-  }
-  wc.openDevTools({ mode: 'detach' });
+/** Open a contents' DevTools detached and pull its window to the front. */
+function openDevToolsForward(wc) {
+  if (!wc.isDevToolsOpened()) wc.openDevTools({ mode: 'detach' });
   let tries = 0;
   const pullForward = () => {
     tries += 1;
@@ -1327,6 +1325,135 @@ function toggleFocusedDevTools() {
     if (tries < 10) setTimeout(pullForward, 120);
   };
   setTimeout(pullForward, 120);
+}
+
+function toggleFocusedDevTools() {
+  const wc = focusedWebContents();
+  if (!wc) return;
+  if (wc.isDevToolsOpened()) {
+    wc.closeDevTools();
+    return;
+  }
+  openDevToolsForward(wc);
+}
+
+// --- Browser context menu for the site views -------------------------------
+// Electron shows no right-click menu by default; this gives the hosted
+// pages the menu a normal browser has: navigation, link/image actions,
+// edit actions in fields, a page screenshot, and Inspect Element.
+function buildWebContextMenu(contents, params) {
+  const template = [];
+  const sep = () => template.push({ type: 'separator' });
+  if (params.linkURL) {
+    template.push({
+      label: 'Copy Link Address',
+      click: () => clipboard.writeText(params.linkURL),
+    });
+    sep();
+  }
+  if (params.mediaType === 'image' && params.srcURL) {
+    template.push(
+      { label: 'Save Image As…', click: () => void saveImageAs(contents, params.srcURL) },
+      { label: 'Copy Image', click: () => contents.copyImageAt(params.x, params.y) },
+      { label: 'Copy Image Address', click: () => clipboard.writeText(params.srcURL) }
+    );
+    sep();
+  }
+  if (params.isEditable) {
+    const flags = params.editFlags || {};
+    template.push(
+      { label: 'Undo', click: () => contents.undo(), enabled: !!flags.canUndo },
+      { label: 'Redo', click: () => contents.redo(), enabled: !!flags.canRedo },
+      { type: 'separator' },
+      { label: 'Cut', click: () => contents.cut(), enabled: !!flags.canCut },
+      { label: 'Copy', click: () => contents.copy(), enabled: !!flags.canCopy },
+      { label: 'Paste', click: () => contents.paste(), enabled: !!flags.canPaste },
+      { label: 'Select All', click: () => contents.selectAll() }
+    );
+    sep();
+  } else if (params.selectionText && params.selectionText.trim()) {
+    template.push({ label: 'Copy', click: () => contents.copy() });
+    sep();
+  }
+  template.push(
+    { label: 'Back', click: () => navGo(contents, 'back'), enabled: navCan(contents, 'back') },
+    { label: 'Forward', click: () => navGo(contents, 'forward'), enabled: navCan(contents, 'forward') },
+    { label: 'Reload', click: () => contents.reload() },
+    { type: 'separator' },
+    { label: 'Take Screenshot', click: () => void takeScreenshot(contents) },
+    {
+      label: 'Open Page in Default Browser',
+      click: () => void shell.openExternal(contents.getURL()),
+    },
+    { type: 'separator' },
+    {
+      label: 'Inspect Element',
+      click: () => {
+        openDevToolsForward(contents);
+        contents.inspectElement(params.x, params.y);
+      },
+    }
+  );
+  return template;
+}
+
+/** Capture the visible page into the active workspace folder as a PNG. */
+async function takeScreenshot(contents) {
+  try {
+    const img = await contents.capturePage();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    let host = 'page';
+    try {
+      host = new URL(contents.getURL()).hostname.replace(/^www\./, '') || 'page';
+    } catch {
+      /* keep the generic name */
+    }
+    const ws = workspaces.active();
+    const dir = ws && ws.folder ? ws.folder : app.getPath('pictures');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `screenshot-${host}-${stamp}.png`);
+    await fs.promises.writeFile(file, img.toPNG());
+    new Notification({ title: 'Hunyuan3D', body: `Screenshot saved: ${path.basename(file)}` }).show();
+  } catch {
+    /* capture raced a navigation — nothing useful to report */
+  }
+}
+
+/** Download an image through the page's own session (keeps its login). */
+async function saveImageAs(contents, srcURL) {
+  try {
+    const res = await contents.session.fetch(srcURL);
+    if (!res.ok) return;
+    const buf = Buffer.from(await res.arrayBuffer());
+    let name = 'image';
+    try {
+      name = decodeURIComponent(path.basename(new URL(srcURL).pathname)) || 'image';
+    } catch {
+      /* keep the generic name */
+    }
+    if (!path.extname(name)) name += '.png';
+    const ws = workspaces.active();
+    const dir = ws && ws.folder ? ws.folder : app.getPath('pictures');
+    const win = BrowserWindow.fromWebContents(contents) || mainWindow;
+    const picked = await dialog.showSaveDialog(win, { defaultPath: path.join(dir, name) });
+    if (picked.canceled || !picked.filePath) return;
+    await fs.promises.writeFile(picked.filePath, buf);
+  } catch {
+    /* offline / blocked image — leave the page as-is */
+  }
+}
+
+const contextMenuAttached = new WeakSet();
+function attachWebContextMenu(contents) {
+  if (contextMenuAttached.has(contents)) return;
+  contextMenuAttached.add(contents);
+  contents.on('context-menu', (_e, params) => {
+    Menu.buildFromTemplate(buildWebContextMenu(contents, params)).popup({
+      window: BrowserWindow.fromWebContents(contents) || mainWindow,
+    });
+  });
+  // Popup windows (login flows) get the same menu.
+  contents.on('did-create-window', (child) => attachWebContextMenu(child.webContents));
 }
 
 // --- Three.js code conversion (glb2ts) -------------------------------------
@@ -2741,7 +2868,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, toggleFocusedDevTools };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, toggleFocusedDevTools, buildWebContextMenu };
 
 /**
  * True when this file is the app's entry point.
