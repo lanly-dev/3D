@@ -1296,6 +1296,39 @@ function focusedWebContents() {
   return w ? w.webContents : null;
 }
 
+/**
+ * Toggle DevTools for the focused contents. Detached mode is explicit:
+ * a view's DevTools window can otherwise open BEHIND the main window
+ * (seen on the Mixamo / Poly Pizza tabs), so after opening, its window
+ * is pulled to the front as soon as it exists.
+ */
+function toggleFocusedDevTools() {
+  const wc = focusedWebContents();
+  if (!wc) return;
+  if (wc.isDevToolsOpened()) {
+    wc.closeDevTools();
+    return;
+  }
+  wc.openDevTools({ mode: 'detach' });
+  let tries = 0;
+  const pullForward = () => {
+    tries += 1;
+    try {
+      const dt = wc.devToolsWebContents;
+      const win = dt && !dt.isDestroyed() ? BrowserWindow.fromWebContents(dt) : null;
+      if (win) {
+        win.show();
+        win.focus();
+        return;
+      }
+    } catch {
+      /* DevTools window not created yet */
+    }
+    if (tries < 10) setTimeout(pullForward, 120);
+  };
+  setTimeout(pullForward, 120);
+}
+
 // --- Three.js code conversion (glb2ts) -------------------------------------
 // Vendored from the glb2ts project: converts a model file into a
 // self-contained TypeScript module that rebuilds it with Three.js at
@@ -2228,10 +2261,10 @@ function buildMenu() {
         { label: 'Forward', accelerator: 'Alt+Right', click: () => focusedWebContents()?.goForward() },
         { label: 'Reload', accelerator: 'Ctrl+R', click: () => focusedWebContents()?.reload() },
         { type: 'separator' },
-        { label: 'Toggle DevTools', accelerator: 'Ctrl+Shift+I', click: () => focusedWebContents()?.toggleDevTools() },
+        { label: 'Toggle DevTools', accelerator: 'Ctrl+Shift+I', click: () => toggleFocusedDevTools() },
         // A menu item takes only one accelerator, so this hidden twin gives
         // Toggle DevTools its second shortcut (F12) with no second visible entry.
-        { label: 'Toggle DevTools', accelerator: 'F12', visible: false, acceleratorWorksWhenHidden: true, click: () => focusedWebContents()?.toggleDevTools() },
+        { label: 'Toggle DevTools', accelerator: 'F12', visible: false, acceleratorWorksWhenHidden: true, click: () => toggleFocusedDevTools() },
       ],
     },
     {
@@ -2708,7 +2741,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, toggleFocusedDevTools };
 
 /**
  * True when this file is the app's entry point.
