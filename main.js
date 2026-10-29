@@ -26,6 +26,7 @@ const {
   BrowserWindow,
   WebContentsView,
   webContents,
+  webFrameMain,
   session,
   Menu,
   shell,
@@ -515,7 +516,61 @@ function isInApp(url, hosts = IN_APP_HOSTS) {
 }
 
 
-function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
+/**
+ * Scrollbar styling for two of the hosted tabs (Lan's picks; Poly Pizza
+ * keeps stock bars):
+ *  - Hunyuan3D: transparent track with a translucent thumb.
+ *  - Mixamo: no bar at all — `display: none` on the pseudo-element.
+ *    Scrolling still works with wheel / touch / keyboard.
+ * insertCSS reaches only the main frame, so subframes receive the same
+ * rules as a <style> element — Mixamo's scroller lives in a frame.
+ */
+const HUNYUAN_SCROLLBAR_CSS = `
+  html { scrollbar-width: thin !important; scrollbar-color: rgba(125, 130, 145, .45) transparent !important; }
+  ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
+  ::-webkit-scrollbar-track { background: transparent !important; }
+  ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45) !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 6px !important; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75) !important; background-clip: padding-box !important; }
+  ::-webkit-scrollbar-corner { background: transparent !important; }
+`;
+
+const MIXAMO_SCROLLBAR_CSS = `
+  * { scrollbar-width: none !important; scrollbar-color: transparent transparent !important; }
+  ::-webkit-scrollbar { display: none !important; }
+`;
+
+function injectScrollbarStyle(contents, css = HUNYUAN_SCROLLBAR_CSS) {
+  const apply = () => {
+    contents.insertCSS(css).catch(() => {});
+  };
+  contents.on('dom-ready', apply);
+  contents.on('did-finish-load', apply);
+  contents.on('did-frame-finish-load', (_e, isMainFrame, processId, routingId) => {
+    if (isMainFrame) return;
+    let frame = null;
+    try {
+      frame = webFrameMain.fromId(processId, routingId);
+    } catch {
+      frame = null;
+    }
+    if (!frame) return;
+    frame
+      .executeJavaScript(
+        `(() => {
+          if (document.getElementById('__app_scrollbar_style')) return;
+          const s = document.createElement('style');
+          s.id = '__app_scrollbar_style';
+          s.textContent = ${JSON.stringify(css)};
+          (document.head || document.documentElement).appendChild(s);
+        })()`
+      )
+      .catch(() => {});
+  });
+  // window.open children (login flows) get the same treatment.
+  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents, css));
+}
+
+function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = null) {
   contents.setWindowOpenHandler(({ url }) => {
     if (isInApp(url, hosts)) {
       // A WebContentsView cannot open a child window directly — create it.
@@ -527,7 +582,8 @@ function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
       const child = new BrowserWindow(childWindowOptions(contents.session));
       child.webContents.setUserAgent(CHROME_UA);
       child.loadURL(url);
-      applyWindowOpenHandler(child.webContents, hosts);
+      applyWindowOpenHandler(child.webContents, hosts, css);
+      if (css) injectScrollbarStyle(child.webContents, css);
       return { action: 'deny' };
     }
     shell.openExternal(url).catch(() => {});
@@ -827,7 +883,8 @@ function createMainWindow() {
   });
   siteView.webContents.setUserAgent(CHROME_UA);
   siteView.webContents.loadURL(HOME_URL);
-  applyWindowOpenHandler(siteView.webContents);
+  applyWindowOpenHandler(siteView.webContents, IN_APP_HOSTS, HUNYUAN_SCROLLBAR_CSS);
+  injectScrollbarStyle(siteView.webContents, HUNYUAN_SCROLLBAR_CSS);
   attachWebContextMenu(siteView.webContents);
   // Keep the nav bar's back/forward arrows in sync with the site history.
   siteView.webContents.on('did-navigate', pushNavState);
@@ -868,7 +925,8 @@ function createMainWindow() {
   });
   mixamoView.webContents.setUserAgent(CHROME_UA);
   mixamoView.webContents.loadURL(MIXAMO_URL);
-  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS);
+  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS, MIXAMO_SCROLLBAR_CSS);
+  injectScrollbarStyle(mixamoView.webContents, MIXAMO_SCROLLBAR_CSS);
   attachWebContextMenu(mixamoView.webContents);
   mixamoView.webContents.on('did-navigate', pushNavState);
   mixamoView.webContents.on('did-navigate-in-page', pushNavState);
@@ -2021,7 +2079,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
 
 /**
  * True when this file is the app's entry point.
