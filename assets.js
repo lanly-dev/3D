@@ -1,13 +1,13 @@
 /**
  * Asset registry (main process).
  *
- * Keeps a small JSON index of every model / Blender script the app has
+ * Keeps a small JSON index of every model and code file the app has
  * produced or seen, so the sidebar can act as an asset-management dashboard.
  *
  * Storage: <userData>/assets.json
  *   { id, name, filePath, kind, ext, size, createdAt, updatedAt, meshId?, workspaceId? }
  *
- * kind: 'model' | 'blender-code' | 'other'
+ * kind: 'model' | 'code' | 'other'
  * Workspace membership is NOT stored: a file belongs to whichever
  * workspace's folder it physically sits in (see resolveWorkspace).
  */
@@ -42,7 +42,6 @@ function writeStore(assets) {
 function classify(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (MODEL_EXTS.includes(ext)) return 'model';
-  if (CODE_EXTS.includes(ext) && filePath.endsWith('.blender.py')) return 'blender-code';
   if (CODE_EXTS.includes(ext)) return 'code';
   return 'other';
 }
@@ -149,21 +148,6 @@ function track(filePath, kind, _workspaceId) {
   return record;
 }
 
-/** Link a generated Blender script back to the mesh it came from. */
-function linkCode(codePath, meshId) {
-  const assets = readStore();
-  const abs = path.resolve(codePath);
-  const record = {
-    id: crypto.randomUUID(),
-    ...describe(abs, null),
-    kind: 'blender-code',
-    meshId,
-    workspaceId: resolveWorkspace(abs),
-  };
-  writeStore([record, ...assets.filter((a) => a.filePath !== abs)]);
-  return record;
-}
-
 /** Where files that belong to no workspace live when moved to Unassigned. */
 function unassignedDir() {
   return path.join(app.getPath('documents'), 'Hunyuan3D', 'Unassigned');
@@ -195,8 +179,7 @@ function moveFile(src, dest) {
 /**
  * Move an asset's file into a workspace's folder (or, with null, into the
  * Unassigned folder). Membership follows the file, so this is the only way
- * an asset changes workspace. A model's generated Blender script
- * (<name>.blender.py) sits beside the mesh and moves along with it.
+ * an asset changes workspace.
  * Throws with a plain message when the move cannot happen.
  */
 function assign(id, workspaceId) {
@@ -217,15 +200,6 @@ function assign(id, workspaceId) {
     const dest = uniqueDest(destDir, path.basename(src));
     moveFile(src, dest);
     moves.set(src, dest);
-    if (classify(src) === 'model') {
-      const base = path.basename(src, path.extname(src));
-      const companion = path.join(srcDir, `${base}.blender.py`);
-      if (fs.existsSync(companion)) {
-        const compDest = uniqueDest(destDir, path.basename(companion));
-        moveFile(companion, compDest);
-        moves.set(companion, compDest);
-      }
-    }
   }
 
   const now = Date.now();
@@ -249,9 +223,7 @@ function assign(id, workspaceId) {
 /**
  * Rename an asset's file in place (same folder). The sidebar edits the
  * base name without extension, so the extension — and with it the kind —
- * is kept, and a model's generated Blender script (<name>.blender.py)
- * is renamed along with it, companion record included (same moves-map
- * pattern as assign). A clash with an existing file is refused rather
+ * is kept. A clash with an existing file is refused rather
  * than uniquified: a rename that silently lands elsewhere would confuse.
  * Returns { ok, message? }.
  */
@@ -276,16 +248,6 @@ function rename(id, newBase) {
   const moves = new Map(); // old absolute path -> new absolute path
   fs.renameSync(src, dest);
   moves.set(src, dest);
-  if (classify(src) === 'model') {
-    const companion = path.join(path.dirname(src), `${path.basename(src, ext)}.blender.py`);
-    const compDest = path.join(path.dirname(src), `${base}.blender.py`);
-    if (fs.existsSync(companion) && !fs.existsSync(compDest)) {
-      try {
-        fs.renameSync(companion, compDest);
-        moves.set(path.resolve(companion), compDest);
-      } catch { /* companion stays put; the model rename still stands */ }
-    }
-  }
   const now = Date.now();
   const next = all.map((a) => {
     const np = moves.get(path.resolve(a.filePath));
@@ -371,7 +333,7 @@ function scanFolder(folder) {
 function stats(workspaceId) {
   const assets = list(workspaceId);
   const models = assets.filter((a) => a.kind === 'model');
-  const codes = assets.filter((a) => a.kind === 'blender-code');
+  const codes = assets.filter((a) => a.kind === 'code');
   const totalSize = assets.reduce((sum, a) => sum + (a.size || 0), 0);
   const last = models[0] || assets[0] || null;
   return {
@@ -387,7 +349,6 @@ function stats(workspaceId) {
 module.exports = {
   list,
   track,
-  linkCode,
   assign,
   rename,
   patch,

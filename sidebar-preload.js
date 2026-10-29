@@ -18,7 +18,6 @@ contextBridge.exposeInMainWorld('api', {
   rename: (id, name) => ipcRenderer.invoke('assets:rename', id, name),
   assetMenu: (id) => ipcRenderer.invoke('assets:contextMenu', id),
   copy: (text) => ipcRenderer.invoke('sidebar:copy', text),
-  convert: (id) => ipcRenderer.invoke('assets:convert', id),
 
   // Workspaces
   workspaces: () => ipcRenderer.invoke('workspaces:list'),

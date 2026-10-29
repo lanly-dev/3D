@@ -196,7 +196,7 @@ function renderList() {
     top.className = 'item-top';
     const badge = document.createElement('span');
     badge.className = `badge ${a.kind}`;
-    badge.textContent = a.kind === 'blender-code' ? 'py' : a.ext.replace('.', '') || 'file';
+    badge.textContent = a.ext.replace('.', '') || 'file';
     const name = document.createElement('span');
     name.className = 'item-name';
     name.textContent = a.name;
@@ -269,18 +269,6 @@ function renderList() {
       });
     });
     actions.append(open, move);
-
-    if (a.kind === 'model') {
-      const conv = document.createElement('button');
-      conv.className = 'btn icon-btn';
-      conv.innerHTML = icon(ICONS.code);
-      conv.title = 'Convert this model into editable Blender Python code with MeshCoder';
-      conv.addEventListener('click', (e) => {
-        e.stopPropagation();
-        bridge.convert(a.id).then((res) => setStatus(res.message || 'Done'));
-      });
-      actions.append(conv);
-    }
 
     const del = document.createElement('button');
     del.className = 'btn icon-btn';

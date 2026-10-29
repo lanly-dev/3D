@@ -2,7 +2,7 @@
  * Workspace registry (main process).
  *
  * A workspace is a named project that owns a folder: downloads land in
- * the active workspace's folder, and MeshCoder output is written there
+ * the active workspace's folder, and generated files are written there
  * too. An asset belongs to a workspace purely because its file sits in
  * that folder — moving the file is how an asset changes workspace.
  *
