@@ -19,8 +19,10 @@ zoomResetBtn.addEventListener('click', () => bridge.zoomReset());
 
 const tabHunyuan = document.getElementById('tab-hunyuan');
 const tabMixamo = document.getElementById('tab-mixamo');
+const tabPolyPizza = document.getElementById('tab-polypizza');
 tabHunyuan.addEventListener('click', () => bridge.switchSite('hunyuan'));
 tabMixamo.addEventListener('click', () => bridge.switchSite('mixamo'));
+tabPolyPizza.addEventListener('click', () => bridge.switchSite('polypizza'));
 
 backBtn.disabled = true;
 forwardBtn.disabled = true;
@@ -29,6 +31,7 @@ bridge.onState((state) => {
   if (state.site) {
     tabHunyuan.classList.toggle('active', state.site === 'hunyuan');
     tabMixamo.classList.toggle('active', state.site === 'mixamo');
+    tabPolyPizza.classList.toggle('active', state.site === 'polypizza');
   }
   backBtn.disabled = !state.canGoBack;
   forwardBtn.disabled = !state.canGoForward;

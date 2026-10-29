@@ -48,6 +48,7 @@ const workspaces = require('./workspaces');
 
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
 const MIXAMO_URL = 'https://www.mixamo.com/';
+const POLYPIZZA_URL = 'https://poly.pizza/';
 const APP_TITLE = 'Hunyuan3D';
 // Chrome UA (the raw Electron UA makes many sites serve broken pages).
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
@@ -56,6 +57,7 @@ const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'gtimg.com', 'qpic.cn'];
 // Mixamo sign-in runs through Adobe ID — its hosts stay in-app too.
 const MIXAMO_IN_APP_HOSTS = ['mixamo.com', 'adobe.com', 'adobelogin.com'];
+const POLYPIZZA_IN_APP_HOSTS = ['poly.pizza'];
 
 // Sidebar layout
 const SIDEBAR_MIN_WIDTH = 200;
@@ -179,18 +181,21 @@ let mainWindow = null;
 let sidebarView = null;
 let siteView = null;
 let mixamoView = null;
+let pizzaView = null;
 let navView = null;
-/** Which site tab fills the content area: 'hunyuan' | 'mixamo'. */
+/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza'. */
 let activeSite = 'hunyuan';
 
 /** The site view the nav bar currently drives (history + zoom). */
 function activeView() {
-  return activeSite === 'mixamo' && mixamoView ? mixamoView : siteView;
+  if (activeSite === 'mixamo' && mixamoView) return mixamoView;
+  if (activeSite === 'polypizza' && pizzaView) return pizzaView;
+  return siteView;
 }
 
-/** Switch the content area between the Hunyuan3D and Mixamo tabs. */
+/** Switch the content area between the site tabs. */
 function setActiveSite(name) {
-  activeSite = name === 'mixamo' ? 'mixamo' : 'hunyuan';
+  activeSite = name === 'mixamo' || name === 'polypizza' ? name : 'hunyuan';
   layoutViews();
   pushNavState();
 }
@@ -893,6 +898,9 @@ function createMainWindow() {
   const mixamoSes = session.fromPartition('persist:mixamo');
   mixamoSes.setUserAgent(CHROME_UA);
   attachDownloadHandler(mixamoSes, 'Mixamo', 'mixamo-model.fbx');
+  const pizzaSes = session.fromPartition('persist:polypizza');
+  pizzaSes.setUserAgent(CHROME_UA);
+  attachDownloadHandler(pizzaSes, 'Poly Pizza', 'polypizza-model.glb');
 
   const win = new BrowserWindow({
     width: 1440,
@@ -1000,10 +1008,40 @@ function createMainWindow() {
   mixamoView.webContents.on('zoom-changed', pushNavState);
   mixamoView.setVisible(false);
 
+  // --- Poly Pizza tab ---------------------------------------------------
+  // Free premade low-poly models; downloads are direct .glb files, so
+  // they flow through the same workspace tracking as the other tabs.
+  pizzaView = new WebContentsView({
+    webPreferences: {
+      session: pizzaSes,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  pizzaView.webContents.setUserAgent(CHROME_UA);
+  pizzaView.webContents.loadURL(POLYPIZZA_URL);
+  applyWindowOpenHandler(pizzaView.webContents, POLYPIZZA_IN_APP_HOSTS);
+  injectScrollbarStyle(pizzaView.webContents);
+  pizzaView.webContents.on('did-navigate', pushNavState);
+  pizzaView.webContents.on('did-navigate-in-page', pushNavState);
+  pizzaView.webContents.on('did-finish-load', () => {
+    if (settings.zoomFactor && settings.zoomFactor !== 1) {
+      try {
+        pizzaView.webContents.setZoomFactor(settings.zoomFactor);
+      } catch {
+        /* view going away — ignore */
+      }
+    }
+    pushNavState();
+  });
+  pizzaView.webContents.on('zoom-changed', pushNavState);
+  pizzaView.setVisible(false);
+
   win.contentView.addChildView(navView);
   win.contentView.addChildView(sidebarView);
   win.contentView.addChildView(siteView);
   win.contentView.addChildView(mixamoView);
+  win.contentView.addChildView(pizzaView);
 
   layoutViews();
   win.on('resize', layoutViews);
@@ -1016,6 +1054,7 @@ function createMainWindow() {
     sidebarView = null;
     siteView = null;
     mixamoView = null;
+    pizzaView = null;
   });
 
   buildMenu();
@@ -1074,7 +1113,7 @@ function layoutViews() {
   // The two site tabs share the content rect; only the active one shows.
   const content = { x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: below };
   const active = activeView();
-  for (const v of [siteView, mixamoView]) {
+  for (const v of [siteView, mixamoView, pizzaView]) {
     if (!v) continue;
     const isActive = v === active;
     try {
