@@ -538,21 +538,42 @@ const SCROLLBAR_CSS = `
 `;
 
 /**
- * Mixamo-only variant (Lan's ask): the scrollbar is fully transparent —
- * zero-size, invisible — while wheel / touch / keyboard scrolling keeps
- * working.
+ * Mixamo-only variant (Lan's ask): transparent track, and the thumb is
+ * invisible until the page is actually scrolling (or the pointer is on
+ * the bar's strip) — an auto-hiding bar. The `app-scrolling` class is
+ * toggled by SCROLL_HIDE_SCRIPT below.
  */
 const MIXAMO_SCROLLBAR_CSS = `
-  * { scrollbar-width: none !important; scrollbar-color: transparent transparent !important; }
-  ::-webkit-scrollbar { width: 0 !important; height: 0 !important; background: transparent !important; }
+  * { scrollbar-width: thin !important; scrollbar-color: transparent transparent !important; }
+  html.app-scrolling { scrollbar-color: rgba(125, 130, 145, .45) transparent !important; }
+  ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
   ::-webkit-scrollbar-track { background: transparent !important; }
-  ::-webkit-scrollbar-thumb { background: transparent !important; }
+  ::-webkit-scrollbar-thumb { background: transparent !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 6px !important; }
+  html.app-scrolling ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45) !important; background-clip: padding-box !important; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75) !important; background-clip: padding-box !important; }
   ::-webkit-scrollbar-corner { background: transparent !important; }
 `;
 
-function injectScrollbarStyle(contents, css = SCROLLBAR_CSS) {
+/**
+ * Installed alongside the Mixamo CSS in every frame: marks the document
+ * as `app-scrolling` while any scroll is in progress (capture phase, so
+ * inner scrollers count), and clears the mark ~0.9 s after the last one.
+ */
+const SCROLL_HIDE_SCRIPT = `(() => {
+  if (window.__appScrollHide) return;
+  window.__appScrollHide = true;
+  let timer = null;
+  window.addEventListener('scroll', () => {
+    document.documentElement.classList.add('app-scrolling');
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => document.documentElement.classList.remove('app-scrolling'), 900);
+  }, true);
+})()`;
+
+function injectScrollbarStyle(contents, css = SCROLLBAR_CSS, hideWhenIdle = false) {
   const apply = () => {
     contents.insertCSS(css).catch(() => {});
+    if (hideWhenIdle) contents.executeJavaScript(SCROLL_HIDE_SCRIPT).catch(() => {});
   };
   // dom-ready covers pages whose full load event lags behind slow media;
   // did-finish-load re-asserts it afterwards. Identical rules, so a
@@ -572,23 +593,30 @@ function injectScrollbarStyle(contents, css = SCROLLBAR_CSS) {
       frame = null;
     }
     if (!frame) return;
-    frame
-      .executeJavaScript(
-        `(() => {
+    const frameScript = hideWhenIdle
+      ? `(() => {
+          if (!document.getElementById('__app_scrollbar_style')) {
+            const s = document.createElement('style');
+            s.id = '__app_scrollbar_style';
+            s.textContent = ${JSON.stringify(css)};
+            (document.head || document.documentElement).appendChild(s);
+          }
+          ${SCROLL_HIDE_SCRIPT}
+        })()`
+      : `(() => {
           if (document.getElementById('__app_scrollbar_style')) return;
           const s = document.createElement('style');
           s.id = '__app_scrollbar_style';
           s.textContent = ${JSON.stringify(css)};
           (document.head || document.documentElement).appendChild(s);
-        })()`
-      )
-      .catch(() => {});
+        })()`;
+    frame.executeJavaScript(frameScript).catch(() => {});
   });
   // window.open children (login flows) get the same treatment.
-  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents, css));
+  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents, css, hideWhenIdle));
 }
 
-function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = SCROLLBAR_CSS) {
+function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = SCROLLBAR_CSS, hideWhenIdle = false) {
   contents.setWindowOpenHandler(({ url }) => {
     if (isInApp(url, hosts)) {
       // A WebContentsView cannot open a child window directly — create it.
@@ -600,8 +628,8 @@ function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = SCROLLBAR_
       const child = new BrowserWindow(childWindowOptions(contents.session));
       child.webContents.setUserAgent(CHROME_UA);
       child.loadURL(url);
-      applyWindowOpenHandler(child.webContents, hosts, css);
-      injectScrollbarStyle(child.webContents, css);
+      applyWindowOpenHandler(child.webContents, hosts, css, hideWhenIdle);
+      injectScrollbarStyle(child.webContents, css, hideWhenIdle);
       return { action: 'deny' };
     }
     shell.openExternal(url).catch(() => {});
@@ -943,8 +971,8 @@ function createMainWindow() {
   });
   mixamoView.webContents.setUserAgent(CHROME_UA);
   mixamoView.webContents.loadURL(MIXAMO_URL);
-  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS, MIXAMO_SCROLLBAR_CSS);
-  injectScrollbarStyle(mixamoView.webContents, MIXAMO_SCROLLBAR_CSS);
+  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS, MIXAMO_SCROLLBAR_CSS, true);
+  injectScrollbarStyle(mixamoView.webContents, MIXAMO_SCROLLBAR_CSS, true);
   attachWebContextMenu(mixamoView.webContents);
   mixamoView.webContents.on('did-navigate', pushNavState);
   mixamoView.webContents.on('did-navigate-in-page', pushNavState);
