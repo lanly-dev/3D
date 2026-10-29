@@ -277,8 +277,31 @@ function highlightPart(p) {
     highlightedPart = p;
   }
   renderPartsList();
+  window.__viewerHighlight = highlightedPart ? highlightedPart.name : null;
   setStatus(highlightedPart ? `Highlighted: ${p.name}` : 'Selection cleared');
 }
+
+// Clicking in the viewport outside the highlighted part restores it.
+// A real click only — orbit drags (pointer moved) must not clear it.
+const clickRaycaster = new THREE.Raycaster();
+let clickDownPos = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  clickDownPos = [e.clientX, e.clientY];
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!clickDownPos) return;
+  const moved = Math.hypot(e.clientX - clickDownPos[0], e.clientY - clickDownPos[1]);
+  clickDownPos = null;
+  if (moved > 5 || !highlightedPart) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1
+  );
+  clickRaycaster.setFromCamera(ndc, camera);
+  const hits = clickRaycaster.intersectObject(highlightedPart.mesh, true);
+  if (!hits.length) highlightPart(highlightedPart); // toggle off + refresh
+});
 
 function applyHighlight(p) {
   p.mesh.traverse((obj) => {
