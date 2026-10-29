@@ -26,7 +26,6 @@ const {
   BrowserWindow,
   WebContentsView,
   webContents,
-  webFrameMain,
   session,
   Menu,
   shell,
@@ -135,12 +134,6 @@ const settings = loadSettings();
 if (settings.translateToEnglish) {
   app.commandLine.appendSwitch('lang', 'en-US');
 }
-// Overlay scrollbars everywhere (including the hosted sites): they float
-// translucently over the content instead of the thick, bright default
-// Windows bars. The app's own pages also style theirs in CSS, so they
-// stay subtle even where this flag has no effect.
-app.commandLine.appendSwitch('enable-features', 'OverlayScrollbar,FluentOverlayScrollbar');
-
 function toggleTranslate() {
   const s = loadSettings();
   s.translateToEnglish = !s.translateToEnglish;
@@ -521,102 +514,8 @@ function isInApp(url, hosts = IN_APP_HOSTS) {
   }
 }
 
-/**
- * Scrollbar styling for hosted site pages. The app's own pages style
- * theirs in CSS; a hosted page (Hunyuan/Mixamo) keeps its default thick
- * bars unless the host injects the style — webContents.insertCSS is the
- * supported way, re-applied on every full load. Neutral grey, so it reads
- * on light and dark pages alike.
- */
-const SCROLLBAR_CSS = `
-  html { scrollbar-width: thin !important; scrollbar-color: rgba(125, 130, 145, .45) transparent !important; }
-  ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
-  ::-webkit-scrollbar-track { background: transparent !important; }
-  ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45) !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 6px !important; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75) !important; background-clip: padding-box !important; }
-  ::-webkit-scrollbar-corner { background: transparent !important; }
-`;
 
-/**
- * Mixamo-only variant (Lan's ask): transparent track, and the thumb is
- * invisible until the page is actually scrolling (or the pointer is on
- * the bar's strip) — an auto-hiding bar. The `app-scrolling` class is
- * toggled by SCROLL_HIDE_SCRIPT below.
- */
-const MIXAMO_SCROLLBAR_CSS = `
-  * { scrollbar-width: thin !important; scrollbar-color: transparent transparent !important; }
-  html.app-scrolling { scrollbar-color: rgba(125, 130, 145, .45) transparent !important; }
-  ::-webkit-scrollbar { width: 10px !important; height: 10px !important; }
-  ::-webkit-scrollbar-track { background: transparent !important; }
-  ::-webkit-scrollbar-thumb { background: transparent !important; border: 3px solid transparent !important; background-clip: padding-box !important; border-radius: 6px !important; }
-  html.app-scrolling ::-webkit-scrollbar-thumb { background: rgba(125, 130, 145, .45) !important; background-clip: padding-box !important; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(125, 130, 145, .75) !important; background-clip: padding-box !important; }
-  ::-webkit-scrollbar-corner { background: transparent !important; }
-`;
-
-/**
- * Installed alongside the Mixamo CSS in every frame: marks the document
- * as `app-scrolling` while any scroll is in progress (capture phase, so
- * inner scrollers count), and clears the mark ~0.9 s after the last one.
- */
-const SCROLL_HIDE_SCRIPT = `(() => {
-  if (window.__appScrollHide) return;
-  window.__appScrollHide = true;
-  let timer = null;
-  window.addEventListener('scroll', () => {
-    document.documentElement.classList.add('app-scrolling');
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => document.documentElement.classList.remove('app-scrolling'), 900);
-  }, true);
-})()`;
-
-function injectScrollbarStyle(contents, css = SCROLLBAR_CSS, hideWhenIdle = false) {
-  const apply = () => {
-    contents.insertCSS(css).catch(() => {});
-    if (hideWhenIdle) contents.executeJavaScript(SCROLL_HIDE_SCRIPT).catch(() => {});
-  };
-  // dom-ready covers pages whose full load event lags behind slow media;
-  // did-finish-load re-asserts it afterwards. Identical rules, so a
-  // second insert is harmless.
-  contents.on('dom-ready', apply);
-  contents.on('did-finish-load', apply);
-  // insertCSS only reaches the MAIN frame — a page whose scroller lives
-  // in an iframe (Mixamo's app shell does this) keeps its default white
-  // bars there. Subframes get the same rules as a <style> element,
-  // re-applied on every frame load.
-  contents.on('did-frame-finish-load', (_e, isMainFrame, processId, routingId) => {
-    if (isMainFrame) return;
-    let frame = null;
-    try {
-      frame = webFrameMain.fromId(processId, routingId);
-    } catch {
-      frame = null;
-    }
-    if (!frame) return;
-    const frameScript = hideWhenIdle
-      ? `(() => {
-          if (!document.getElementById('__app_scrollbar_style')) {
-            const s = document.createElement('style');
-            s.id = '__app_scrollbar_style';
-            s.textContent = ${JSON.stringify(css)};
-            (document.head || document.documentElement).appendChild(s);
-          }
-          ${SCROLL_HIDE_SCRIPT}
-        })()`
-      : `(() => {
-          if (document.getElementById('__app_scrollbar_style')) return;
-          const s = document.createElement('style');
-          s.id = '__app_scrollbar_style';
-          s.textContent = ${JSON.stringify(css)};
-          (document.head || document.documentElement).appendChild(s);
-        })()`;
-    frame.executeJavaScript(frameScript).catch(() => {});
-  });
-  // window.open children (login flows) get the same treatment.
-  contents.on('did-create-window', (child) => injectScrollbarStyle(child.webContents, css, hideWhenIdle));
-}
-
-function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = SCROLLBAR_CSS, hideWhenIdle = false) {
+function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS) {
   contents.setWindowOpenHandler(({ url }) => {
     if (isInApp(url, hosts)) {
       // A WebContentsView cannot open a child window directly — create it.
@@ -628,8 +527,7 @@ function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = SCROLLBAR_
       const child = new BrowserWindow(childWindowOptions(contents.session));
       child.webContents.setUserAgent(CHROME_UA);
       child.loadURL(url);
-      applyWindowOpenHandler(child.webContents, hosts, css, hideWhenIdle);
-      injectScrollbarStyle(child.webContents, css, hideWhenIdle);
+      applyWindowOpenHandler(child.webContents, hosts);
       return { action: 'deny' };
     }
     shell.openExternal(url).catch(() => {});
@@ -930,7 +828,6 @@ function createMainWindow() {
   siteView.webContents.setUserAgent(CHROME_UA);
   siteView.webContents.loadURL(HOME_URL);
   applyWindowOpenHandler(siteView.webContents);
-  injectScrollbarStyle(siteView.webContents);
   attachWebContextMenu(siteView.webContents);
   // Keep the nav bar's back/forward arrows in sync with the site history.
   siteView.webContents.on('did-navigate', pushNavState);
@@ -971,8 +868,7 @@ function createMainWindow() {
   });
   mixamoView.webContents.setUserAgent(CHROME_UA);
   mixamoView.webContents.loadURL(MIXAMO_URL);
-  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS, MIXAMO_SCROLLBAR_CSS, true);
-  injectScrollbarStyle(mixamoView.webContents, MIXAMO_SCROLLBAR_CSS, true);
+  applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS);
   attachWebContextMenu(mixamoView.webContents);
   mixamoView.webContents.on('did-navigate', pushNavState);
   mixamoView.webContents.on('did-navigate-in-page', pushNavState);
@@ -1002,7 +898,6 @@ function createMainWindow() {
   pizzaView.webContents.setUserAgent(CHROME_UA);
   pizzaView.webContents.loadURL(POLYPIZZA_URL);
   applyWindowOpenHandler(pizzaView.webContents, POLYPIZZA_IN_APP_HOSTS);
-  injectScrollbarStyle(pizzaView.webContents);
   attachWebContextMenu(pizzaView.webContents);
   pizzaView.webContents.on('did-navigate', pushNavState);
   pizzaView.webContents.on('did-navigate-in-page', pushNavState);
@@ -2126,7 +2021,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
 
 /**
  * True when this file is the app's entry point.
