@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('api', {
   pickWorkspaceFolder: (id) => ipcRenderer.invoke('workspaces:pickFolder', id),
   revealWorkspace: (id) => ipcRenderer.invoke('workspaces:reveal', id),
 
+  // App
+  updateApp: () => ipcRenderer.invoke('app:updateRestart'),
+
   // Layout
   toggle: () => ipcRenderer.invoke('sidebar:toggle'),
   setWidth: (width) => ipcRenderer.invoke('sidebar:setWidth', width),

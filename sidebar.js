@@ -624,6 +624,24 @@ $('refresh').addEventListener('click', () => {
   setStatus('Refreshed');
 });
 
+$('update').addEventListener('click', async () => {
+  if (typeof bridge.updateApp !== 'function') {
+    setStatus('Update unavailable — restart the app to load the new sidebar');
+    return;
+  }
+  const btn = $('update');
+  btn.disabled = true;
+  setStatus('Checking for updates…');
+  try {
+    const res = await bridge.updateApp();
+    setStatus(res && res.message ? res.message : 'Update failed');
+  } catch {
+    setStatus('Update failed — check your connection and try again');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // Clicking the status line copies its message (e.g. an error to paste
 // into a bug report). 'Copied' shows briefly, then the message returns.
 $('status').addEventListener('click', () => {

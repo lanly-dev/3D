@@ -20,6 +20,7 @@ Mixamo.
 | `main.js` | Electron main process: windows, menu, IPC, downloads, conversions |
 | `assets.js` | Tracked asset index (models, scripts, workspaces) |
 | `workspaces.js` | Named project folders + active workspace |
+| `updater.js` | Self-update for the sidebar's Update button: `git pull --ff-only` in a checkout, else a file sync from GitHub main; package.json changes never auto-restart |
 | `glb2ts.mjs` | Model → self-contained TypeScript module (Three.js runtime rebuild, textures embedded) |
 | `sidebar.html` / `sidebar.js` / `sidebar-preload.js` / `sidebar.css` | Left asset sidebar UI |
 | `mixamo-export.html` / `mixamo-export.js` | Hidden worker page: re-export a model's geometry as OBJ for Mixamo's character upload |

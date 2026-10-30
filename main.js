@@ -42,6 +42,7 @@ const url = require('url');
 const assets = require('./assets');
 const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
+const updater = require('./updater');
 
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
 const MIXAMO_URL = 'https://www.mixamo.com/';
@@ -2101,6 +2102,18 @@ function registerIpc() {
   });
   // Copy the sidebar status line to the clipboard (main process owns the
   // clipboard API; the renderer must not depend on navigator.clipboard).
+  // Sidebar Update button: pull the latest app code (git pull when
+  // the app folder is a checkout, else a file sync from GitHub main)
+  // and restart when the updater says it is safe. H3D_UPDATE_BASE
+  // overrides the download source (mirrors/tests).
+  ipcMain.handle('app:updateRestart', async () => {
+    const res = await updater.performUpdate(app.getAppPath(), { base: process.env.H3D_UPDATE_BASE || undefined });
+    if (res.action === 'restart') {
+      // Answer first so the sidebar can show the message, then go.
+      setTimeout(() => { app.relaunch(); app.exit(0); }, 900);
+    }
+    return res;
+  });
   ipcMain.handle('sidebar:copy', (_e, text) => {
     clipboard.writeText(String(text || ''));
     return true;
