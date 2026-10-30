@@ -26,6 +26,20 @@ function icon(paths) {
     '</svg>'
   );
 }
+// Filled mini-glyphs for the thumbnail content badges — at 9px inside
+// a dark chip, filled shapes stay legible where stroke icons blur.
+const BADGE_SVGS = {
+  tex: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect width="5" height="5" fill="#fff"/><rect x="5" y="5" width="5" height="5" fill="#fff"/><rect x="5" width="5" height="5" fill="#8b93a3"/><rect y="5" width="5" height="5" fill="#8b93a3"/></svg>',
+  anim: '<svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="3,1.8 8.4,5 3,8.2" fill="#fff"/></svg>',
+};
+function thumbBadge(cls, title, svg) {
+  const s = document.createElement('span');
+  s.className = 'thumb-badge ' + cls;
+  s.title = title;
+  s.innerHTML = svg;
+  return s;
+}
+
 const ICONS = {
   open:
     '<path d="M15 3h6v6"/><path d="M10 14 21 3"/>' +
@@ -294,6 +308,20 @@ function renderList() {
         thumb.className = 'thumb';
         thumb.src = a.thumb;
         thumb.alt = '';
+        // Content badges on the thumbnail itself — textures and/or
+        // animation, probed by the thumb worker when it rendered.
+        const chips = [];
+        if (a.tex) chips.push(thumbBadge('tex', 'Has textures', BADGE_SVGS.tex));
+        if (a.clips > 0) chips.push(thumbBadge('anim', a.clips === 1 ? 'Has animation (1 clip)' : `Has animation (${a.clips} clips)`, BADGE_SVGS.anim));
+        if (chips.length) {
+          const wrap = document.createElement('div');
+          wrap.className = 'thumb-wrap';
+          const bar = document.createElement('div');
+          bar.className = 'thumb-badges';
+          bar.append(...chips);
+          wrap.append(thumb, bar);
+          thumb = wrap;
+        }
       } else {
         thumb = document.createElement('div');
         thumb.className = 'thumb placeholder';

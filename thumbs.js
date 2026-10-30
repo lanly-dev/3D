@@ -18,6 +18,10 @@
  * machine; failures pinned at v3 during that broken window would
  * otherwise never retry, leaving code thumbnails permanently absent
  * with no error anywhere.
+ * v5: each successful render also records what the model carries —
+ * `tex` (any material texture) and `clips` (animation clip count) —
+ * for the sidebar's thumbnail badges. Without the bump, already-fresh
+ * entries would never re-render and the badges would never appear.
  */
 const { app } = require('electron');
 const fs = require('fs');
@@ -45,7 +49,7 @@ function writeMeta(meta) {
   fs.writeFileSync(metaPath(), JSON.stringify(meta, null, 2));
 }
 
-const RENDER_VERSION = 4;
+const RENDER_VERSION = 5;
 
 function thumbPath(id) {
   return path.join(dir(), `${String(id)}.png`);
@@ -55,9 +59,16 @@ function get(id) {
   return readMeta()[String(id)] || null;
 }
 
-function set(id, mtimeMs) {
+function set(id, mtimeMs, info) {
   const meta = readMeta();
-  meta[String(id)] = { mtimeMs, v: RENDER_VERSION };
+  const entry = { mtimeMs, v: RENDER_VERSION };
+  // What the thumb worker saw in the model (see thumb.js probe): the
+  // sidebar badges read these. Absent when the worker reported nothing.
+  if (info) {
+    entry.tex = !!info.tex;
+    entry.clips = Math.max(0, info.clips | 0);
+  }
+  meta[String(id)] = entry;
   writeMeta(meta);
 }
 

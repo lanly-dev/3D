@@ -295,6 +295,28 @@ body.collapsed .grip { width: 4px; }
   letter-spacing: .4px;
 }
 
+/* Content badges (textures / animation) overlaid on the thumbnail. */
+.thumb-wrap { position: relative; flex: 0 0 auto; }
+.thumb-wrap .thumb { display: block; }
+.thumb-badges {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  display: flex;
+  gap: 3px;
+}
+.thumb-badge {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(8, 10, 14, .8);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.thumb-badge svg { width: 9px; height: 9px; display: block; }
+
 .item-top { display: flex; align-items: center; gap: 7px; }
 .badge {
   flex: 0 0 auto;

@@ -66,10 +66,7 @@ function extOf(p) {
   return m ? m[1] : '';
 }
 
-// A constructed model's textures decode asynchronously; wait until
-// every texture image has finished (or a short deadline) so the
-// captured frame is the textured one, not the untextured first paint.
-function waitForTextures(root) {
+function collectTextures(root) {
   const texs = [];
   root.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
@@ -80,6 +77,24 @@ function waitForTextures(root) {
       }
     });
   });
+  return texs;
+}
+
+// Record what the model carries — any material texture, and how many
+// animation clips — for the sidebar's thumbnail badges. The main
+// process reads window.__thumbMeta after a successful render and
+// stores it alongside the thumbnail (thumbs.js). Detection is what the
+// loaders actually produced: an .obj's MTL textures never load here
+// (same as the viewer), so it reports tex:false like it renders.
+function probe(root, clips) {
+  window.__thumbMeta = { tex: collectTextures(root).length > 0, clips: clips || 0 };
+}
+
+// A constructed model's textures decode asynchronously; wait until
+// every texture image has finished (or a short deadline) so the
+// captured frame is the textured one, not the untextured first paint.
+function waitForTextures(root) {
+  const texs = collectTextures(root);
   if (!texs.length) return Promise.resolve();
   const deadline = Date.now() + 2500;
   return new Promise((resolve) => {
@@ -112,6 +127,7 @@ async function load() {
       if (!factory) throw new Error('this file exports no create…() function');
       const obj = factory();
       scene.add(obj);
+      probe(obj, (obj.animations || []).length);
       fitCamera(obj);
       await waitForTextures(obj);
       done(true);
@@ -138,12 +154,13 @@ async function load() {
       new GLTFLoader().parse(
         input,
         '',
-        (gltf) => { scene.add(gltf.scene); fitCamera(gltf.scene); done(true); },
+        (gltf) => { scene.add(gltf.scene); probe(gltf.scene, (gltf.animations || []).length); fitCamera(gltf.scene); done(true); },
         (e) => done(false, e)
       );
     } else if (ext === 'obj') {
       const obj = new OBJLoader().parse(new TextDecoder().decode(data));
       scene.add(obj);
+      probe(obj, 0);
       fitCamera(obj);
       done(true);
     } else if (ext === 'stl') {
@@ -152,6 +169,7 @@ async function load() {
         new THREE.MeshStandardMaterial({ color: 0x9fb4d8, metalness: 0.1, roughness: 0.6 })
       );
       scene.add(mesh);
+      probe(mesh, 0);
       fitCamera(mesh);
       done(true);
     } else if (ext === 'ply') {
@@ -160,11 +178,13 @@ async function load() {
         ? new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: !!geo.getAttribute('color'), metalness: 0.1, roughness: 0.6 }))
         : new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.02, vertexColors: !!geo.getAttribute('color') }));
       scene.add(obj);
+      probe(obj, 0);
       fitCamera(obj);
       done(true);
     } else if (ext === 'fbx') {
       const obj = new FBXLoader().parse(data, '');
       scene.add(obj);
+      probe(obj, (obj.animations || []).length);
       fitCamera(obj);
       done(true);
     } else {

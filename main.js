@@ -726,10 +726,13 @@ async function renderThumb(id) {
       await new Promise((r) => setTimeout(r, 300));
     }
     if (status === 'ok') {
+      // What the worker saw in the model (textures / animation clips)
+      // rides along with the thumbnail record for the sidebar badges.
+      const info = await win.webContents.executeJavaScript('window.__thumbMeta || null').catch(() => null);
       const img = await win.webContents.capturePage();
       fs.mkdirSync(thumbs.dir(), { recursive: true });
       fs.writeFileSync(thumbs.thumbPath(id), img.toPNG());
-      thumbs.set(id, fs.statSync(asset.filePath).mtimeMs);
+      thumbs.set(id, fs.statSync(asset.filePath).mtimeMs, info);
       notifySidebarSoon();
     } else if (fs.existsSync(asset.filePath)) {
       // A failure caused by a missing dependency (the transpiler the
@@ -1852,6 +1855,10 @@ function registerIpc() {
       const fresh = current && !meta.failed && meta.mtimeMs === a.updatedAt && pngExists;
       if (fresh) {
         a.thumb = url.pathToFileURL(thumbs.thumbPath(a.id)).href;
+        // Recorded by the thumb worker at render time (RENDER_VERSION
+        // 5+): the sidebar badges read these.
+        a.tex = !!meta.tex;
+        a.clips = meta.clips || 0;
       } else if (!current || !meta.failed || meta.mtimeMs !== a.updatedAt) {
         // Missing, stale, or deleted PNG — but a render that failed for
         // this exact file version is not retried until the file changes.
