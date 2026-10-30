@@ -308,7 +308,7 @@ body.collapsed .grip { width: 4px; }
 }
 .thumb-wrap .thumb { display: block; }
 .thumb-corners { position: absolute; inset: 0; pointer-events: none; }
-.corner { position: absolute; width: 13px; height: 13px; }
+.corner { position: absolute; width: 9px; height: 9px; }
 .corner.tl { top: 0; left: 0; background: #f2b544; clip-path: polygon(0 0, 100% 0, 0 100%); }
 .corner.tr { top: 0; right: 0; background: #b18cff; clip-path: polygon(0 0, 100% 0, 100% 100%); }
 .corner.bl { bottom: 0; left: 0; background: #38bdf8; clip-path: polygon(0 0, 0 100%, 100% 100%); }

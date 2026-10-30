@@ -302,17 +302,20 @@ function renderList() {
         thumb.alt = '';
         // Corner markers for what the model carries, probed by the
         // thumb worker when it rendered: TL texture, TR multipart,
-        // BL rig, BR animation. The tooltip names them in words.
+        // BL rig, BR animation. The thumbnail's tooltip carries the
+        // full file path plus every feature in words (or the plain
+        // summary when it has none).
         const corners = [];
         const words = [];
         if (a.tex) { corners.push(['tl', 'tex']); words.push('Textured'); }
         if (a.parts > 1) { corners.push(['tr', 'parts']); words.push(`Multipart (${a.parts} parts)`); }
         if (a.rig) { corners.push(['bl', 'rig']); words.push('Rigged'); }
         if (a.clips > 0) { corners.push(['br', 'anim']); words.push(a.clips === 1 ? 'Animation (1 clip)' : `Animation (${a.clips} clips)`); }
+        const tip = `${a.filePath}\n${words.length ? words.join(' · ') : 'Single mesh — no textures, rig, or animation'}`;
         if (corners.length) {
           const wrap = document.createElement('div');
           wrap.className = 'thumb-wrap';
-          wrap.title = words.join(' · ');
+          wrap.title = tip;
           const layer = document.createElement('div');
           layer.className = 'thumb-corners';
           for (const [pos, kind] of corners) {
@@ -322,11 +325,15 @@ function renderList() {
           }
           wrap.append(thumb, layer);
           thumb = wrap;
+        } else {
+          thumb.title = tip;
         }
       } else {
         thumb = document.createElement('div');
         thumb.className = 'thumb placeholder';
         thumb.textContent = (a.ext || 'file').replace('.', '');
+        // No thumbnail yet, so no probed features — the path still helps.
+        thumb.title = a.filePath;
       }
       el.append(thumb, body);
     } else {
