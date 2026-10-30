@@ -172,10 +172,12 @@ function renderWorkspaces() {
 }
 
 function renderStats(stats) {
-  $('stat-total').textContent = stats.total;
-  $('stat-models').textContent = stats.models;
-  $('stat-codes').textContent = stats.codes;
-  $('stat-size').textContent = formatSize(stats.totalSize);
+  // The counts are no longer an always-visible row (Lan's ask): they
+  // ride as the tooltip on the Workspace label, and as a second line
+  // on the workspace select's own tooltip.
+  const counts = `${stats.total || 0} assets · ${stats.models || 0} models · ${stats.codes || 0} code · ${formatSize(stats.totalSize)} on disk`;
+  $('ws-label').title = counts;
+  $('ws-select').title = `Active workspace — new downloads save here\n${counts}`;
   $('subtitle').textContent = stats.lastAsset
     ? `Last: ${stats.lastAsset.name}`
     : 'Hunyuan3D';
