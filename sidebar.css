@@ -484,7 +484,14 @@ body.collapsed .grip { width: 4px; }
   gap: 7px;
   margin-bottom: 0;
   padding: 8px;
+  /* No outer frame in thumbnail view (Lan's call): the picture sits
+     directly on the sidebar background; hover rings the thumb. */
+  border-color: transparent;
+  background: transparent;
 }
+
+.list.grid .item:hover { border-color: transparent; }
+.list.grid .item:hover .thumb { border-color: var(--accent); }
 
 .list.grid .thumb {
   width: 100%;
