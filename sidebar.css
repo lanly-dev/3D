@@ -310,7 +310,6 @@ body.collapsed .grip { width: 4px; }
   height: 14px;
   border-radius: 4px;
   background: rgba(8, 10, 14, .8);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, .16);
   display: flex;
   align-items: center;
   justify-content: center;
