@@ -472,7 +472,7 @@ body.collapsed .grip { width: 4px; }
 
 .list.grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
   gap: 8px;
   align-content: start;
 }
@@ -481,11 +481,9 @@ body.collapsed .grip { width: 4px; }
   position: relative;
   flex-direction: column;
   align-items: stretch;
-  gap: 7px;
+  gap: 0;
   margin-bottom: 0;
-  padding: 8px;
-  /* No outer frame in thumbnail view (Lan's call): the picture sits
-     directly on the sidebar background; hover rings the thumb. */
+  padding: 0;
   border-color: transparent;
   background: transparent;
 }
