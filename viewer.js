@@ -16,6 +16,13 @@ const fileName = filePath.split(/[\\/]/).pop() || 'Model';
 document.title = 'Viewer — ' + fileName;
 document.getElementById('name').textContent = fileName;
 
+// Image files get a dedicated mode: the picture itself, fitted to the
+// window — no 3D scene, no model toolbar. (Keep in sync with
+// assets.IMAGE_EXTS in the main process.)
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'svg'];
+const isImage = IMAGE_EXTS.includes((filePath.toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '');
+if (isImage) document.body.classList.add('image-mode');
+
 const statusEl = document.getElementById('status');
 const setStatus = (msg) => {
   statusEl.textContent = msg;
@@ -353,6 +360,22 @@ async function load() {
   }
   setStatus('Loading…');
   const ext = extOf(filePath);
+  if (isImage) {
+    // Show the picture itself (blob URL — the CSP allows blob: images).
+    try {
+      const data = await window.viewerApi.readFile(filePath);
+      const mime = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', avif: 'image/avif', svg: 'image/svg+xml' }[ext];
+      const img = document.getElementById('imageView');
+      img.src = URL.createObjectURL(new Blob([data], { type: mime }));
+      await img.decode();
+      img.hidden = false;
+      window.__viewerStatus = 'ok';
+      setStatus(img.naturalWidth > 0 ? `Image · ${img.naturalWidth}×${img.naturalHeight}` : 'Image');
+    } catch (e) {
+      showError(e);
+    }
+    return;
+  }
   if (ext === 'ts' || ext === 'js' || ext === 'mjs') {
     // Converted code: the main process hands over JS (TypeScript already
     // transpiled); import it as a module and construct the model.
@@ -483,6 +506,7 @@ document.getElementById('screenshot').addEventListener('click', async () => {
 });
 
 window.addEventListener('resize', () => {
+  if (isImage) return; // no canvas to resize — the <img> is CSS-fitted
   const w = viewport.clientWidth;
   const h = viewport.clientHeight;
   camera.aspect = w / h;

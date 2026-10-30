@@ -322,7 +322,10 @@ function renderList() {
         if (a.parts > 1) { corners.push(['tr', 'parts']); words.push(`Multipart (${a.parts} parts)`); }
         if (a.rig) { corners.push(['bl', 'rig']); words.push('Rigged'); }
         if (a.clips > 0) { corners.push(['br', 'anim']); words.push(a.clips === 1 ? 'Animation (1 clip)' : `Animation (${a.clips} clips)`); }
-        const tip = `${a.filePath}\n${words.length ? words.join(' · ') : 'Single mesh — no textures, rig, or animation'}`;
+        // Images carry no model features — the tooltip is just the path.
+        const tip = a.image
+          ? a.filePath
+          : `${a.filePath}\n${words.length ? words.join(' · ') : 'Single mesh — no textures, rig, or animation'}`;
         if (corners.length) {
           const wrap = document.createElement('div');
           wrap.className = 'thumb-wrap';

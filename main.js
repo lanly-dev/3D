@@ -34,6 +34,7 @@ const {
   Notification,
   dialog,
   ipcMain,
+  nativeImage,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -704,6 +705,29 @@ async function pumpThumbQueue() {
 async function renderThumb(id) {
   const asset = assets.find(id);
   if (!asset || !fs.existsSync(asset.filePath)) return;
+  // Images thumbnail themselves: decode + downscale with nativeImage
+  // instead of the Three.js worker. The feature record is all-empty —
+  // the corner markers describe 3D models, not pictures.
+  if (assets.IMAGE_EXTS.includes(path.extname(asset.filePath).toLowerCase())) {
+    try {
+      const img = nativeImage.createFromPath(asset.filePath);
+      if (img.isEmpty()) throw new Error('unreadable image');
+      const size = img.getSize();
+      const scale = Math.min(1, 144 / Math.max(size.width, size.height));
+      const small = scale < 1
+        ? img.resize({ width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)) })
+        : img;
+      fs.mkdirSync(thumbs.dir(), { recursive: true });
+      fs.writeFileSync(thumbs.thumbPath(id), small.toPNG());
+      thumbs.set(id, fs.statSync(asset.filePath).mtimeMs, { tex: false, clips: 0, rig: false, parts: 0 });
+      notifySidebarSoon();
+    } catch {
+      if (fs.existsSync(asset.filePath)) {
+        thumbs.markFailed(id, fs.statSync(asset.filePath).mtimeMs);
+      }
+    }
+    return;
+  }
   const win = new BrowserWindow({
     width: 144,
     height: 144,
@@ -1861,11 +1885,12 @@ function registerIpc() {
   ipcMain.handle('assets:list', (_e, workspaceId) => {
     const list = assets.list(workspaceId || null);
     // Mirror the assets:view routing so the sidebar can label its Open
-    // button truthfully: models and converted code files open in the
-    // in-app viewer, everything else in the default app.
+    // button truthfully: models, converted code files, and images open
+    // in the in-app viewer, everything else in the default app.
     for (const a of list) {
       const ext = path.extname(a.filePath || '').toLowerCase();
-      a.viewer = a.kind === 'model' || assets.MODEL_EXTS.includes(ext) || isConvertedCodeFile(a.filePath);
+      a.image = assets.IMAGE_EXTS.includes(ext);
+      a.viewer = a.kind === 'model' || assets.MODEL_EXTS.includes(ext) || isConvertedCodeFile(a.filePath) || a.image;
     }
     // One-time functional check, the first time converted code is on
     // screen: viewing/thumbnailing it needs the sucrase transpiler. If
@@ -1950,7 +1975,7 @@ function registerIpc() {
     if (!found) return false;
     const items = [];
     const viewExt = path.extname(found.filePath || '').toLowerCase();
-    if (found.kind === 'model' || assets.MODEL_EXTS.includes(viewExt) || isConvertedCodeFile(found.filePath)) {
+    if (found.kind === 'model' || assets.MODEL_EXTS.includes(viewExt) || isConvertedCodeFile(found.filePath) || assets.IMAGE_EXTS.includes(viewExt)) {
       items.push({ label: 'Open in viewer', click: () => openViewer(found.filePath) });
     }
     items.push(
@@ -2022,6 +2047,11 @@ function registerIpc() {
     }
     // Converted Three.js code constructs itself — the viewer can run it.
     if (isConvertedCodeFile(found.filePath)) {
+      openViewer(found.filePath);
+      return { ok: true };
+    }
+    // Images open in the viewer's image mode.
+    if (assets.IMAGE_EXTS.includes(ext)) {
       openViewer(found.filePath);
       return { ok: true };
     }

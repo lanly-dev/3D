@@ -167,6 +167,29 @@ body[data-theme="light"] {
 
 #viewport canvas { display: block; }
 
+/* Image mode: the picture fitted to the window under the toolbar;
+   the 3D viewport and the model-only controls hide. */
+#imageView {
+  position: fixed;
+  top: 38px;
+  left: 0;
+  width: 100%;
+  height: calc(100% - 38px);
+  object-fit: contain;
+  display: none;
+}
+body.image-mode #imageView { display: block; }
+body.image-mode #viewport,
+body.image-mode #partsPanel { display: none; }
+body.image-mode #texture,
+body.image-mode #wireframe,
+body.image-mode #rotate,
+body.image-mode #grid,
+body.image-mode #parts,
+body.image-mode #ambientGroup,
+body.image-mode #reset,
+body.image-mode #screenshot { display: none; }
+
 /* Animation playback bar (FBX/GLB clips) — bottom center, only shown
    when the loaded model actually carries animation. Colors come from
    the theme variables, so it follows the light/dark toggle. */
