@@ -9,7 +9,7 @@ const state = {
   kind: 'all',
   /** Feature filters from the + popup: show only models carrying the
    *  checked features (probed with their thumbnails). */
-  features: { tex: false, rig: false, anim: false },
+  features: { tex: false, rig: false, anim: false, parts: false },
   workspaces: [],
   activeId: null,
   /** 'all' | 'unassigned' | <workspace id> */
@@ -132,6 +132,7 @@ function visibleAssets() {
     if (state.features.tex && !a.tex) return false;
     if (state.features.rig && !a.rig) return false;
     if (state.features.anim && !(a.clips > 0)) return false;
+    if (state.features.parts && !(a.parts > 1)) return false;
     if (state.scope === 'unassigned' && a.workspaceId) return false;
     if (state.scope !== 'all' && state.scope !== 'unassigned' && a.workspaceId !== state.scope) {
       return false;
@@ -414,6 +415,7 @@ const FEATURE_FILTERS = [
   ['tex', 'Texture'],
   ['rig', 'Rig'],
   ['anim', 'Animation'],
+  ['parts', 'Multipart'],
 ];
 
 function closeFeatureMenu() {
@@ -429,7 +431,7 @@ function syncFeatureBtn() {
   btn.classList.toggle('active', on.length > 0);
   btn.title = on.length
     ? `Feature filters on: ${on.join(', ')} — click to change`
-    : 'Filter by model features (texture, rig, animation)';
+    : 'Filter by model features (texture, rig, animation, multipart)';
 }
 
 function openFeatureMenu() {

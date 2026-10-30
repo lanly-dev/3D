@@ -19,6 +19,7 @@ const workspaces = require('./workspaces');
 
 const MODEL_EXTS = ['.glb', '.gltf', '.obj', '.fbx', '.stl', '.ply'];
 const CODE_EXTS = ['.py'];
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.avif', '.svg'];
 
 function storePath() {
   return path.join(app.getPath('userData'), 'assets.json');
@@ -299,8 +300,8 @@ function findByPath(filePath) {
 }
 
 /**
- * Scan a folder for model files that are not tracked yet.
- * Returns the list of newly tracked assets.
+ * Scan a folder for files that are not tracked yet: models, converted
+ * Three.js code, and images. Returns the list of newly tracked assets.
  */
 function scanFolder(folder) {
   let entries = [];
@@ -323,8 +324,11 @@ function scanFolder(folder) {
     }
     if (!st.isFile()) continue;
     // Models, plus converted Three.js code files — those get the viewer
-    // and thumbnail treatment too, so they must be tracked to appear.
-    if (classify(full) !== 'model' && !isConvertedCode(full)) continue;
+    // and thumbnail treatment too, so they must be tracked to appear —
+    // plus image files (kind 'other': listed, opened in the default
+    // image app, no viewer/thumbnail).
+    const ext = path.extname(full).toLowerCase();
+    if (classify(full) !== 'model' && !isConvertedCode(full) && !IMAGE_EXTS.includes(ext)) continue;
     added.push(track(full, null, owner ? owner.id : null));
   }
   return added;
@@ -361,4 +365,5 @@ module.exports = {
   unassignedDir,
   isConvertedCode,
   MODEL_EXTS,
+  IMAGE_EXTS,
 };
