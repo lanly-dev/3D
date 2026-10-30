@@ -1655,6 +1655,22 @@ async function pickWorkspaceFolder(id) {
 }
 
 /**
+ * Move an asset's file into a workspace folder (or Unassigned) — the
+ * context menu's counterpart of the row button's Move popup. Same
+ * semantics as the assets:assign IPC: the file physically moves,
+ * membership follows it.
+ */
+function moveAssetTo(found, targetId, targetName) {
+  try {
+    assets.assign(found.id, targetId);
+    pushSidebarStatus(`File moved to ${targetName}`);
+  } catch (err) {
+    pushSidebarStatus(err && err.message ? err.message : 'Move failed');
+  }
+  notifySidebar();
+}
+
+/**
  * Move an asset's file to the Recycle Bin (with confirmation) and drop its
  * row. A file already missing from disk just drops its row.
  */
@@ -1976,9 +1992,28 @@ function registerIpc() {
     if (!found) return false;
     const items = [];
     const viewExt = path.extname(found.filePath || '').toLowerCase();
-    if (found.kind === 'model' || assets.MODEL_EXTS.includes(viewExt) || isConvertedCodeFile(found.filePath) || assets.IMAGE_EXTS.includes(viewExt)) {
+    // The row's three action buttons, mirrored in the menu: Open,
+    // Move, Remove (Remove sits at the bottom, next to Delete file).
+    // Open routes like the row button: the viewer for files that have
+    // one, the machine's default app for everything else.
+    const viewerEligible = found.kind === 'model' || assets.MODEL_EXTS.includes(viewExt) || isConvertedCodeFile(found.filePath) || assets.IMAGE_EXTS.includes(viewExt);
+    if (viewerEligible) {
       items.push({ label: 'Open in viewer', click: () => openViewer(found.filePath) });
+    } else {
+      items.push({ label: 'Open', click: () => { shell.openPath(found.filePath).catch(() => {}); } });
     }
+    // Move to workspace — same targets as the row button's popup,
+    // current home checkmarked.
+    const currentWs = (assets.findByPath(found.filePath) || {}).workspaceId || null;
+    const moveItems = workspaces.list().map((w) => ({
+      label: `${w.id === currentWs ? '✓ ' : ''}${w.name}`,
+      click: () => moveAssetTo(found, w.id, w.name),
+    }));
+    moveItems.push({
+      label: `${currentWs ? '' : '✓ '}Unassigned`,
+      click: () => moveAssetTo(found, null, 'Unassigned'),
+    });
+    items.push({ label: 'Move to workspace', submenu: moveItems });
     items.push(
       { label: 'Show in Explorer', click: () => shell.showItemInFolder(found.filePath) },
     );
