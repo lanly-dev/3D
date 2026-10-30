@@ -121,6 +121,21 @@ body.collapsed .grip { width: 4px; }
 }
 .toolbar input { flex: 1 1 auto; min-width: 0; }
 .toolbar select { min-width: 0; }
+
+/* The filter and sort dropdowns drop the native chevron (Lan's
+   call) — they still open on click — and pick up a hover effect
+   like the toolbar buttons: accent border, lifted background. */
+#kind, #sort {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  transition: border-color .12s ease, background-color .12s ease;
+}
+
+#kind:hover, #sort:hover {
+  border-color: var(--accent);
+  background: var(--bg-3);
+}
 .toolbar input::placeholder { color: var(--fg-dim); }
 
 .btn {
