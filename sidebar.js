@@ -26,21 +26,11 @@ function icon(paths) {
     '</svg>'
   );
 }
-// Filled mini-glyphs for the thumbnail content badges — at 9px inside
-// a dark chip, filled shapes stay legible where stroke icons blur.
-const BADGE_SVGS = {
-  tex: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect width="5" height="5" fill="#fff"/><rect x="5" y="5" width="5" height="5" fill="#fff"/><rect x="5" width="5" height="5" fill="#8b93a3"/><rect y="5" width="5" height="5" fill="#8b93a3"/></svg>',
-  anim: '<svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="3,1.8 8.4,5 3,8.2" fill="#fff"/></svg>',
-  rig: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.4 7.6 7.6 2.4" stroke="#fff" stroke-width="1.3"/><circle cx="2.4" cy="7.6" r="1.7" fill="#fff"/><circle cx="5" cy="5" r="1.35" fill="#fff"/><circle cx="7.6" cy="2.4" r="1.7" fill="#fff"/></svg>',
-  parts: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="0.9" y="0.9" width="3.6" height="3.6" fill="#fff"/><rect x="5.5" y="0.9" width="3.6" height="3.6" fill="#fff"/><rect x="0.9" y="5.5" width="3.6" height="3.6" fill="#fff"/></svg>',
-};
-function thumbBadge(cls, title, svg) {
-  const s = document.createElement('span');
-  s.className = 'thumb-badge ' + cls;
-  s.title = title;
-  s.innerHTML = svg;
-  return s;
-}
+// Thumbnail corner markers: one colored triangle per model feature,
+// each pinned to a fixed corner so the model itself stays visible —
+// top-left texture (amber), top-right multipart (violet), bottom-left
+// rig (sky), bottom-right animation (green). The wrap's tooltip lists
+// the features in words. Colors live in sidebar.css (.corner.tex etc).
 
 const ICONS = {
   open:
@@ -310,20 +300,27 @@ function renderList() {
         thumb.className = 'thumb';
         thumb.src = a.thumb;
         thumb.alt = '';
-        // Content badges on the thumbnail itself — textures, animation,
-        // rig, multipart — probed by the thumb worker when it rendered.
-        const chips = [];
-        if (a.tex) chips.push(thumbBadge('tex', 'Has textures', BADGE_SVGS.tex));
-        if (a.clips > 0) chips.push(thumbBadge('anim', a.clips === 1 ? 'Has animation (1 clip)' : `Has animation (${a.clips} clips)`, BADGE_SVGS.anim));
-        if (a.rig) chips.push(thumbBadge('rig', 'Has rig (skeleton)', BADGE_SVGS.rig));
-        if (a.parts > 1) chips.push(thumbBadge('parts', `Multipart — ${a.parts} parts`, BADGE_SVGS.parts));
-        if (chips.length) {
+        // Corner markers for what the model carries, probed by the
+        // thumb worker when it rendered: TL texture, TR multipart,
+        // BL rig, BR animation. The tooltip names them in words.
+        const corners = [];
+        const words = [];
+        if (a.tex) { corners.push(['tl', 'tex']); words.push('Textured'); }
+        if (a.parts > 1) { corners.push(['tr', 'parts']); words.push(`Multipart (${a.parts} parts)`); }
+        if (a.rig) { corners.push(['bl', 'rig']); words.push('Rigged'); }
+        if (a.clips > 0) { corners.push(['br', 'anim']); words.push(a.clips === 1 ? 'Animation (1 clip)' : `Animation (${a.clips} clips)`); }
+        if (corners.length) {
           const wrap = document.createElement('div');
           wrap.className = 'thumb-wrap';
-          const bar = document.createElement('div');
-          bar.className = 'thumb-badges';
-          bar.append(...chips);
-          wrap.append(thumb, bar);
+          wrap.title = words.join(' · ');
+          const layer = document.createElement('div');
+          layer.className = 'thumb-corners';
+          for (const [pos, kind] of corners) {
+            const c = document.createElement('span');
+            c.className = `corner ${pos} ${kind}`;
+            layer.appendChild(c);
+          }
+          wrap.append(thumb, layer);
           thumb = wrap;
         }
       } else {

@@ -295,28 +295,24 @@ body.collapsed .grip { width: 4px; }
   letter-spacing: .4px;
 }
 
-/* Content badges (textures / animation) overlaid on the thumbnail. */
-.thumb-wrap { position: relative; flex: 0 0 auto; }
+/* Feature corners on the thumbnail: one colored triangle per model
+   feature, pinned to a fixed corner so the model stays visible —
+   TL texture (amber), TR multipart (violet), BL rig (sky),
+   BR animation (green). The wrap clips them to the thumb's rounding
+   and carries the tooltip naming the features. */
+.thumb-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+}
 .thumb-wrap .thumb { display: block; }
-.thumb-badges {
-  position: absolute;
-  left: 3px;
-  bottom: 3px;
-  display: flex;
-  flex-wrap: wrap;
-  max-width: 45px;
-  gap: 3px;
-}
-.thumb-badge {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: rgba(8, 10, 14, .8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.thumb-badge svg { width: 9px; height: 9px; display: block; }
+.thumb-corners { position: absolute; inset: 0; pointer-events: none; }
+.corner { position: absolute; width: 13px; height: 13px; }
+.corner.tl { top: 0; left: 0; background: #f2b544; clip-path: polygon(0 0, 100% 0, 0 100%); }
+.corner.tr { top: 0; right: 0; background: #b18cff; clip-path: polygon(0 0, 100% 0, 100% 100%); }
+.corner.bl { bottom: 0; left: 0; background: #38bdf8; clip-path: polygon(0 0, 0 100%, 100% 100%); }
+.corner.br { bottom: 0; right: 0; background: #3ecf8e; clip-path: polygon(100% 0, 100% 100%, 0 100%); }
 
 .item-top { display: flex; align-items: center; gap: 7px; }
 .badge {
