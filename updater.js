@@ -59,25 +59,70 @@ function gitPull(dir) {
   });
 }
 
-async function syncFiles(dir, base, files) {
+async function fetchAll(base, files) {
   const fetched = [];
   for (const f of files) {
     const res = await fetch(`${base}/${f}`);
     if (!res.ok) throw new Error(`Download failed for ${f} (${res.status})`);
     fetched.push([f, Buffer.from(await res.arrayBuffer())]);
   }
+  return fetched;
+}
+
+/** Which of the fetched files differ from what's on disk in `dir`. */
+function changedFrom(dir, fetched) {
   const changed = [];
   for (const [f, buf] of fetched) {
-    const p = path.join(dir, f);
     let cur = null;
-    try { cur = fs.readFileSync(p); } catch { /* not present yet */ }
-    if (!cur || !cur.equals(buf)) {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, buf);
-      changed.push(f);
-    }
+    try { cur = fs.readFileSync(path.join(dir, f)); } catch { /* not present yet */ }
+    if (!cur || !cur.equals(buf)) changed.push(f);
   }
   return changed;
+}
+
+async function syncFiles(dir, base, files) {
+  const fetched = await fetchAll(base, files);
+  const changed = changedFrom(dir, fetched);
+  const byName = new Map(fetched);
+  for (const f of changed) {
+    const p = path.join(dir, f);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, byName.get(f));
+  }
+  return changed;
+}
+
+function gitCmd(dir, args, timeout = 30000) {
+  return new Promise((resolve, reject) => {
+    execFile('git', ['-C', dir, ...args], { timeout }, (err, stdout) => {
+      if (err) reject(new Error((String(err.message) || 'git failed').slice(0, 200)));
+      else resolve(String(stdout || ''));
+    });
+  });
+}
+
+/**
+ * Read-only update check (backs the Update button's visibility):
+ * does main hold anything this install doesn't? Git route fetches
+ * (refs only — the working tree is never touched) and diffs HEAD
+ * against origin/main; the download route fetches and compares
+ * without writing. Errors come back as { error } so the caller can
+ * leave the UI exactly as it was.
+ */
+async function checkForUpdate(dir, opts = {}) {
+  try {
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      await gitCmd(dir, ['fetch', '--quiet']);
+      const out = await gitCmd(dir, ['diff', '--name-only', 'HEAD..origin/main']);
+      const changed = out.split('\n').map((l) => l.trim()).filter(Boolean);
+      return { available: changed.length > 0, changed };
+    }
+    const fetched = await fetchAll(opts.base || RAW_BASE, opts.files || SYNC_FILES);
+    const changed = changedFrom(dir, fetched);
+    return { available: changed.length > 0, changed };
+  } catch (e) {
+    return { available: false, changed: [], error: (e && e.message) || 'check failed' };
+  }
 }
 
 function outcome(changed, how) {
@@ -111,4 +156,4 @@ async function performUpdate(dir, opts = {}) {
   }
 }
 
-module.exports = { performUpdate, SYNC_FILES, RAW_BASE };
+module.exports = { performUpdate, checkForUpdate, SYNC_FILES, RAW_BASE };

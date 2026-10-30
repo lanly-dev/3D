@@ -418,6 +418,9 @@ body.collapsed .grip { width: 4px; }
   font-size: 11px;
 }
 #status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+/* The Update button hides while the app is current (sidebar.js sets
+   .hidden from the update check that rides along with Refresh). */
+#update[hidden] { display: none; }
 
 /* Scrollbars: transparent track, thin translucent thumb — the default
    Windows bars are thick and bright against the dark UI. */

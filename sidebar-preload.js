@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // App
   updateApp: () => ipcRenderer.invoke('app:updateRestart'),
+  checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
 
   // Layout
   toggle: () => ipcRenderer.invoke('sidebar:toggle'),

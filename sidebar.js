@@ -509,6 +509,35 @@ async function refresh() {
   const scope = state.scope === 'all' ? null : state.scope;
   renderStats(await bridge.stats(scope));
   renderList();
+  checkUpdate();
+}
+
+// ---- update availability ----
+// Refresh also checks whether a newer app version exists on GitHub
+// (Lan's ask). The check is network work and refresh() fires after
+// every action, so it is throttled to once a minute and never blocks
+// the refresh. The Update button hides while the app is current and
+// reappears when an update lands; a failed check (offline, git
+// trouble) leaves the button exactly as it was.
+let updateCheckAt = 0;
+let updateChecking = false;
+async function checkUpdate() {
+  if (typeof bridge.checkUpdate !== 'function' || updateChecking) return;
+  const now = Date.now();
+  if (now - updateCheckAt < 60000) return;
+  updateChecking = true;
+  updateCheckAt = now;
+  try {
+    const res = await bridge.checkUpdate();
+    if (res && !res.error) {
+      const btn = $('update');
+      btn.hidden = !res.available;
+      btn.title = res.available
+        ? `${res.changed.length} file(s) changed on GitHub — pull them and restart`
+        : 'Pull the latest app version from GitHub and restart';
+    }
+  } catch { /* leave the button as it was */ }
+  updateChecking = false;
 }
 
 /** On a fresh store, pull in whatever models already sit in Downloads. */
