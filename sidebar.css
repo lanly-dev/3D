@@ -517,9 +517,9 @@ body.collapsed .grip { width: 4px; }
 
 .list.grid .ext-chip {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  font-size: 9px;
+  top: 3px;
+  right: 3px;
+  font-size: 7px;
   font-weight: 650;
   letter-spacing: .5px;
   text-transform: uppercase;
