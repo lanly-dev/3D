@@ -18,7 +18,6 @@ const crypto = require('crypto');
 const workspaces = require('./workspaces');
 
 const MODEL_EXTS = ['.glb', '.gltf', '.obj', '.fbx', '.stl', '.ply'];
-const CODE_EXTS = ['.py'];
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.avif', '.svg'];
 
 function storePath() {
@@ -43,8 +42,25 @@ function writeStore(assets) {
 function classify(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (MODEL_EXTS.includes(ext)) return 'model';
-  if (CODE_EXTS.includes(ext)) return 'code';
+  // Converted Three.js modules are the only 'code' kind left — the
+  // .py / Blender-code era ended when the MeshCoder path was removed.
+  if (isConvertedCode(filePath)) return 'code';
   return 'other';
+}
+
+/**
+ * The kind a record should report. Stored kinds self-heal at the code
+ * boundary: a converted module that was tracked before classification
+ * checked its header (stored as 'other') reports 'code', and a record
+ * still carrying the old .py-era 'code' kind drops to 'other'.
+ */
+function healKind(filePath, existing) {
+  const stored = existing ? existing.kind : null;
+  if (stored === 'model') return 'model';
+  const classified = classify(filePath);
+  if (classified === 'code') return 'code';
+  if (stored === 'code') return 'other';
+  return stored || classified;
 }
 
 /** True for a code file produced by glb2ts (its header comment says so). */
@@ -76,7 +92,7 @@ function describe(filePath, existing) {
     fileName: path.basename(filePath),
     filePath,
     ext: path.extname(filePath).toLowerCase(),
-    kind: existing ? existing.kind : classify(filePath),
+    kind: healKind(filePath, existing),
     size,
     createdAt: existing ? existing.createdAt : Date.now(),
     updatedAt: mtime,
@@ -323,12 +339,10 @@ function scanFolder(folder) {
       continue;
     }
     if (!st.isFile()) continue;
-    // Models, plus converted Three.js code files — those get the viewer
-    // and thumbnail treatment too, so they must be tracked to appear —
-    // plus image files (kind 'other': listed, opened in the default
-    // image app, no viewer/thumbnail).
+    // Models and converted Three.js code get the viewer + thumbnail
+    // treatment; images get thumbnails and the viewer's image mode.
     const ext = path.extname(full).toLowerCase();
-    if (classify(full) !== 'model' && !isConvertedCode(full) && !IMAGE_EXTS.includes(ext)) continue;
+    if (classify(full) === 'other' && !IMAGE_EXTS.includes(ext)) continue;
     added.push(track(full, null, owner ? owner.id : null));
   }
   return added;

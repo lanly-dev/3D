@@ -124,7 +124,10 @@ function startRename(nameEl, asset) {
 function visibleAssets() {
   const q = state.filter.trim().toLowerCase();
   return state.assets.filter((a) => {
-    if (state.kind !== 'all' && a.kind !== state.kind) return false;
+    // The kind dropdown's 'Other' means "not a model" (converted code,
+    // images, misc files) — it is a bucket, not the literal kind.
+    if (state.kind === 'model' && a.kind !== 'model') return false;
+    if (state.kind === 'other' && a.kind === 'model') return false;
     // Feature filters (the + popup): a checked feature must be present.
     // Assets whose features were never probed (no thumbnail yet) count
     // as not having it — they reappear once rendered, or when the

@@ -311,7 +311,7 @@ body.collapsed .grip { width: 4px; }
   color: var(--fg-dim);
 }
 .badge.model { color: #bcd4ff; background: rgba(76,141,255,.15); }
-.badge.blender-code { color: #ffd9a8; background: rgba(242,181,68,.16); }
+.badge.code { color: #a8e6b0; background: rgba(80,200,120,.14); }
 .item-name {
   flex: 1 1 auto;
   min-width: 0;
