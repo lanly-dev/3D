@@ -107,7 +107,7 @@ body.collapsed .grip { width: 4px; }
 .toolbar {
   display: flex;
   gap: 6px;
-  padding: 5px;
+  padding: 0 12px 10px;
 }
 
 .toolbar input, .toolbar select {
@@ -454,3 +454,59 @@ body.collapsed .grip { width: 4px; }
     margin-left: 10px;
   }
 }
+
+/* ---------- thumbnail (grid) view ---------- */
+/* The toolbar toggle flips the list between detailed rows (default)
+   and a grid of tiles: square thumbnail on top, name/meta below,
+   actions along the bottom. These rules sit after the container
+   query above and out-specify it, so tiles ignore the wide-row
+   layout no matter how wide the sidebar gets. */
+.view-btn.active {
+  background: rgba(76, 141, 255, .18);
+  border-color: var(--accent);
+  color: #bcd4ff;
+}
+
+.list.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+
+.list.grid .item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  margin-bottom: 0;
+  padding: 8px;
+}
+
+.list.grid .thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.list.grid .thumb-wrap {
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.list.grid .thumb-wrap .thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.list.grid .thumb.placeholder { font-size: 14px; }
+.list.grid .corner { width: 13px; height: 13px; }
+
+.list.grid .item-body { display: block; }
+
+.list.grid .item-actions {
+  flex-wrap: wrap;
+  margin-top: 6px;
+  margin-left: 0;
+}
+
+.list.grid .empty { grid-column: 1 / -1; }

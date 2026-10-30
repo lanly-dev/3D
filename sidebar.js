@@ -10,6 +10,8 @@ const state = {
   /** Feature filters from the + popup: show only models carrying the
    *  checked features (probed with their thumbnails). */
   features: { tex: false, rig: false, anim: false, parts: false },
+  /** List layout: 'detail' rows (default) or 'grid' thumbnail tiles. */
+  view: 'detail',
   workspaces: [],
   activeId: null,
   /** 'all' | 'unassigned' | <workspace id> */
@@ -188,6 +190,7 @@ function renderStats(stats) {
 
 function renderList() {
   const list = $('list');
+  list.classList.toggle('grid', state.view === 'grid');
   const items = visibleAssets();
   list.innerHTML = '';
 
@@ -355,6 +358,14 @@ function renderList() {
         thumb.title = a.filePath;
       }
       el.append(thumb, body);
+    } else if (state.view === 'grid') {
+      // Grid tiles need a visual block even for files the viewer never
+      // renders (misc 'other' files) — a placeholder tile, ext label.
+      const ph = document.createElement('div');
+      ph.className = 'thumb placeholder';
+      ph.textContent = (a.ext || 'file').replace('.', '');
+      ph.title = a.filePath;
+      el.append(ph, body);
     } else {
       el.append(body);
     }
@@ -579,6 +590,21 @@ $('ws-select').addEventListener('change', (e) => {
 });
 
 // ---- events ----
+function syncViewToggle() {
+  const grid = state.view === 'grid';
+  const btn = $('view-toggle');
+  btn.textContent = grid ? '☰' : '▦';
+  btn.title = grid ? 'Switch to detailed view' : 'Switch to thumbnail view';
+  btn.classList.toggle('active', grid);
+}
+
+$('view-toggle').addEventListener('click', () => {
+  state.view = state.view === 'grid' ? 'detail' : 'grid';
+  syncViewToggle();
+  renderList();
+});
+syncViewToggle();
+
 $('search').addEventListener('input', (e) => {
   state.filter = e.target.value;
   renderList();
