@@ -802,6 +802,9 @@ function openViewer(filePath) {
       nodeIntegration: false,
     },
   });
+  // The viewer is a focused model window — no application menu bar
+  // (the main window keeps the menu; its actions target the site tabs).
+  win.removeMenu();
   viewerWindows.add(win);
   win.on('closed', () => viewerWindows.delete(win));
   win.loadFile(path.join(__dirname, 'viewer.html'), { query: { file: filePath } });
@@ -2122,7 +2125,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer };
 
 /**
  * True when this file is the app's entry point.
