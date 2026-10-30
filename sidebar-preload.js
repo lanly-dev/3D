@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld('api', {
   updateApp: () => ipcRenderer.invoke('app:updateRestart'),
   checkUpdate: () => ipcRenderer.invoke('app:checkUpdate'),
 
+  // UI preferences (view mode, feature filters, sort order)
+  getPrefs: () => ipcRenderer.invoke('sidebar:getPrefs'),
+  setPrefs: (prefs) => ipcRenderer.invoke('sidebar:setPrefs', prefs),
+
   // Layout
   toggle: () => ipcRenderer.invoke('sidebar:toggle'),
   setWidth: (width) => ipcRenderer.invoke('sidebar:setWidth', width),

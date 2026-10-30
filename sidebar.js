@@ -12,6 +12,8 @@ const state = {
   features: { tex: false, rig: false, anim: false, parts: false },
   /** List layout: 'detail' rows (default) or 'grid' thumbnail tiles. */
   view: 'detail',
+  /** Sort order for the list: newest | name | size | parts. */
+  sort: 'newest',
   workspaces: [],
   activeId: null,
   /** 'all' | 'unassigned' | <workspace id> */
@@ -123,9 +125,16 @@ function startRename(nameEl, asset) {
   input.addEventListener('blur', () => finish(true));
 }
 
+const SORTS = {
+  newest: (x, y) => (y.updatedAt || 0) - (x.updatedAt || 0),
+  name: (x, y) => String(x.name || '').localeCompare(String(y.name || ''), undefined, { sensitivity: 'base' }),
+  size: (x, y) => (y.size || 0) - (x.size || 0),
+  parts: (x, y) => (y.parts || 0) - (x.parts || 0),
+};
+
 function visibleAssets() {
   const q = state.filter.trim().toLowerCase();
-  return state.assets.filter((a) => {
+  const filtered = state.assets.filter((a) => {
     // The kind dropdown's 'Other' means "not a model" (converted code,
     // images, misc files) — it is a bucket, not the literal kind.
     if (state.kind === 'model' && a.kind !== 'model') return false;
@@ -149,6 +158,7 @@ function visibleAssets() {
       (a.ext || '').toLowerCase().includes(q)
     );
   });
+  return filtered.sort(SORTS[state.sort] || SORTS.newest);
 }
 
 function workspaceName(id) {
@@ -377,6 +387,9 @@ function renderList() {
       chip.className = 'ext-chip';
       chip.textContent = (a.ext || 'file').replace('.', '');
       el.appendChild(chip);
+      // No visible Open button on a tile — a double-click on the
+      // tile does what the row's Open button does.
+      el.addEventListener('dblclick', () => open.click());
     }
     list.appendChild(el);
   }
@@ -484,6 +497,7 @@ function openFeatureMenu() {
       state.features[key] = !state.features[key];
       check.textContent = state.features[key] ? '✓' : '';
       syncFeatureBtn();
+      savePrefs();
       renderList();
     });
     menu.appendChild(b);
@@ -639,9 +653,16 @@ function syncViewToggle() {
 $('view-toggle').addEventListener('click', () => {
   state.view = state.view === 'grid' ? 'detail' : 'grid';
   syncViewToggle();
+  savePrefs();
   renderList();
 });
 syncViewToggle();
+
+$('sort').addEventListener('change', (e) => {
+  state.sort = e.target.value;
+  savePrefs();
+  renderList();
+});
 
 $('search').addEventListener('input', (e) => {
   state.filter = e.target.value;
@@ -737,9 +758,42 @@ if (typeof bridge.onStatus === 'function') {
 
 window.addEventListener('error', (e) => console.error('sidebar error:', e.message));
 
-refresh().catch((e) => {
-  console.error('refresh failed', e);
-  setStatus('Failed to load assets');
-});
+// ---- persisted UI preferences ----
+// View mode, feature filters and sort order survive restarts: main
+// keeps them in settings.json. Loaded before the first refresh so
+// the list opens the way it was left; saved on every change.
+function savePrefs() {
+  if (typeof bridge.setPrefs !== 'function') return;
+  bridge.setPrefs({ view: state.view, features: { ...state.features }, sort: state.sort }).catch(() => {});
+}
+
+async function loadPrefs() {
+  if (typeof bridge.getPrefs !== 'function') return;
+  try {
+    const p = await bridge.getPrefs();
+    if (!p) return;
+    if (p.view === 'grid' || p.view === 'detail') state.view = p.view;
+    if (p.features) {
+      for (const k of Object.keys(state.features)) state.features[k] = !!p.features[k];
+    }
+    if (SORTS[p.sort]) state.sort = p.sort;
+  } catch { /* defaults stand */ }
+}
+
+function applyPrefs() {
+  syncViewToggle();
+  syncFeatureBtn();
+  $('sort').value = state.sort;
+}
+
+loadPrefs()
+  .then(() => {
+    applyPrefs();
+    return refresh();
+  })
+  .catch((e) => {
+    console.error('refresh failed', e);
+    setStatus('Failed to load assets');
+  });
 bootstrapScan().catch((e) => console.error('bootstrap scan failed', e));
 setStatus('Ready');

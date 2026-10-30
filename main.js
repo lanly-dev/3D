@@ -2154,6 +2154,14 @@ function registerIpc() {
   // Read-only companion: is a newer version available? Drives the
   // Update button's visibility (hidden while the app is current).
   ipcMain.handle('app:checkUpdate', () => updater.checkForUpdate(app.getAppPath(), { base: process.env.H3D_UPDATE_BASE || undefined }));
+  // Sidebar UI preferences (view mode, feature filters, sort order),
+  // persisted in settings.json with the other app settings.
+  ipcMain.handle('sidebar:getPrefs', () => settings.sidebarPrefs || null);
+  ipcMain.handle('sidebar:setPrefs', (_e, prefs) => {
+    settings.sidebarPrefs = prefs && typeof prefs === 'object' ? prefs : null;
+    saveSettings(settings);
+    return true;
+  });
   ipcMain.handle('sidebar:copy', (_e, text) => {
     clipboard.writeText(String(text || ''));
     return true;
