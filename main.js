@@ -2019,8 +2019,10 @@ function registerIpc() {
     );
     // Models can also become runtime code: a self-contained .ts module
     // that rebuilds the model with Three.js (textures embedded). The
-    // variants live in a submenu so the menu stays short.
+    // variants live in a submenu so the menu stays short. A separator
+    // sets the model-only actions apart from the general ones above.
     if (found.kind === 'model') {
+      items.push({ type: 'separator' });
       const convert = (opts) => () => {
         convertFileToTs(found.filePath, opts).then((msg) => pushSidebarStatus(msg)).catch(() => {});
       };
