@@ -369,6 +369,15 @@ function renderList() {
     } else {
       el.append(body);
     }
+    if (state.view === 'grid') {
+      // Thumbnail view is thumbnail-only (the name/meta/actions body
+      // is CSS-hidden): the file type rides on the thumbnail itself,
+      // as a chip at its top-right.
+      const chip = document.createElement('span');
+      chip.className = 'ext-chip';
+      chip.textContent = (a.ext || 'file').replace('.', '');
+      el.appendChild(chip);
+    }
     list.appendChild(el);
   }
 }

@@ -461,10 +461,9 @@ body.collapsed .grip { width: 4px; }
 
 /* ---------- thumbnail (grid) view ---------- */
 /* The toolbar toggle flips the list between detailed rows (default)
-   and a grid of tiles: square thumbnail on top, name/meta below,
-   actions along the bottom. These rules sit after the container
-   query above and out-specify it, so tiles ignore the wide-row
-   layout no matter how wide the sidebar gets. */
+   and a grid of thumbnail-only tiles. These rules sit after the
+   container query above and out-specify it, so tiles ignore the
+   wide-row layout no matter how wide the sidebar gets. */
 .view-btn.active {
   background: rgba(76, 141, 255, .18);
   border-color: var(--accent);
@@ -479,6 +478,7 @@ body.collapsed .grip { width: 4px; }
 }
 
 .list.grid .item {
+  position: relative;
   flex-direction: column;
   align-items: stretch;
   gap: 7px;
@@ -505,12 +505,24 @@ body.collapsed .grip { width: 4px; }
 .list.grid .thumb.placeholder { font-size: 14px; }
 .list.grid .corner { width: 13px; height: 13px; }
 
-.list.grid .item-body { display: block; }
+/* Thumbnail view shows the thumbnail only — name, meta and actions
+   hide (right-click still offers them all). The file extension rides
+   as a chip at the thumbnail's top-right. */
+.list.grid .item-body { display: none; }
 
-.list.grid .item-actions {
-  flex-wrap: wrap;
-  margin-top: 6px;
-  margin-left: 0;
+.list.grid .ext-chip {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: #e8ecf4;
+  background: rgba(10, 12, 16, .62);
+  padding: 2px 5px;
+  border-radius: 4px;
+  pointer-events: none;
 }
 
 .list.grid .empty { grid-column: 1 / -1; }
