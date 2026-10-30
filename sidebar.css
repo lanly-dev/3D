@@ -303,6 +303,8 @@ body.collapsed .grip { width: 4px; }
   left: 3px;
   bottom: 3px;
   display: flex;
+  flex-wrap: wrap;
+  max-width: 45px;
   gap: 3px;
 }
 .thumb-badge {

@@ -22,6 +22,9 @@
  * `tex` (any material texture) and `clips` (animation clip count) —
  * for the sidebar's thumbnail badges. Without the bump, already-fresh
  * entries would never re-render and the badges would never appear.
+ * v6: the record gains `rig` (skinned mesh or bones present) and
+ * `parts` (mesh count) for two more badges; same reasoning — without
+ * the bump, v5-fresh entries would show no rig/parts badges forever.
  */
 const { app } = require('electron');
 const fs = require('fs');
@@ -49,7 +52,7 @@ function writeMeta(meta) {
   fs.writeFileSync(metaPath(), JSON.stringify(meta, null, 2));
 }
 
-const RENDER_VERSION = 5;
+const RENDER_VERSION = 6;
 
 function thumbPath(id) {
   return path.join(dir(), `${String(id)}.png`);
@@ -67,6 +70,8 @@ function set(id, mtimeMs, info) {
   if (info) {
     entry.tex = !!info.tex;
     entry.clips = Math.max(0, info.clips | 0);
+    entry.rig = !!info.rig;
+    entry.parts = Math.max(0, info.parts | 0);
   }
   meta[String(id)] = entry;
   writeMeta(meta);

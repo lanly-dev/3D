@@ -31,6 +31,8 @@ function icon(paths) {
 const BADGE_SVGS = {
   tex: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect width="5" height="5" fill="#fff"/><rect x="5" y="5" width="5" height="5" fill="#fff"/><rect x="5" width="5" height="5" fill="#8b93a3"/><rect y="5" width="5" height="5" fill="#8b93a3"/></svg>',
   anim: '<svg viewBox="0 0 10 10" aria-hidden="true"><polygon points="3,1.8 8.4,5 3,8.2" fill="#fff"/></svg>',
+  rig: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.4 7.6 7.6 2.4" stroke="#fff" stroke-width="1.3"/><circle cx="2.4" cy="7.6" r="1.7" fill="#fff"/><circle cx="5" cy="5" r="1.35" fill="#fff"/><circle cx="7.6" cy="2.4" r="1.7" fill="#fff"/></svg>',
+  parts: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="0.9" y="0.9" width="3.6" height="3.6" fill="#fff"/><rect x="5.5" y="0.9" width="3.6" height="3.6" fill="#fff"/><rect x="0.9" y="5.5" width="3.6" height="3.6" fill="#fff"/></svg>',
 };
 function thumbBadge(cls, title, svg) {
   const s = document.createElement('span');
@@ -308,11 +310,13 @@ function renderList() {
         thumb.className = 'thumb';
         thumb.src = a.thumb;
         thumb.alt = '';
-        // Content badges on the thumbnail itself — textures and/or
-        // animation, probed by the thumb worker when it rendered.
+        // Content badges on the thumbnail itself — textures, animation,
+        // rig, multipart — probed by the thumb worker when it rendered.
         const chips = [];
         if (a.tex) chips.push(thumbBadge('tex', 'Has textures', BADGE_SVGS.tex));
         if (a.clips > 0) chips.push(thumbBadge('anim', a.clips === 1 ? 'Has animation (1 clip)' : `Has animation (${a.clips} clips)`, BADGE_SVGS.anim));
+        if (a.rig) chips.push(thumbBadge('rig', 'Has rig (skeleton)', BADGE_SVGS.rig));
+        if (a.parts > 1) chips.push(thumbBadge('parts', `Multipart — ${a.parts} parts`, BADGE_SVGS.parts));
         if (chips.length) {
           const wrap = document.createElement('div');
           wrap.className = 'thumb-wrap';

@@ -1890,9 +1890,11 @@ function registerIpc() {
       if (fresh) {
         a.thumb = url.pathToFileURL(thumbs.thumbPath(a.id)).href;
         // Recorded by the thumb worker at render time (RENDER_VERSION
-        // 5+): the sidebar badges read these.
+        // 5+, rig/parts 6+): the sidebar badges read these.
         a.tex = !!meta.tex;
         a.clips = meta.clips || 0;
+        a.rig = !!meta.rig;
+        a.parts = meta.parts || 0;
       } else if (!current || !meta.failed || meta.mtimeMs !== a.updatedAt) {
         // Missing, stale, or deleted PNG — but a render that failed for
         // this exact file version is not retried until the file changes.

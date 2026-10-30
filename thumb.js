@@ -80,14 +80,27 @@ function collectTextures(root) {
   return texs;
 }
 
-// Record what the model carries — any material texture, and how many
-// animation clips — for the sidebar's thumbnail badges. The main
-// process reads window.__thumbMeta after a successful render and
-// stores it alongside the thumbnail (thumbs.js). Detection is what the
-// loaders actually produced: an .obj's MTL textures never load here
-// (same as the viewer), so it reports tex:false like it renders.
+// Record what the model carries — any material texture, how many
+// animation clips, whether it has a rig (a skinned mesh or bones), and
+// how many mesh parts it is built from — for the sidebar's thumbnail
+// badges. The main process reads window.__thumbMeta after a successful
+// render and stores it alongside the thumbnail (thumbs.js). Detection
+// is what the loaders actually produced: an .obj's MTL textures never
+// load here (same as the viewer), so it reports tex:false like it
+// renders. Animation does NOT imply rig: clips can target plain nodes
+// or morphs, so the two are probed independently.
 function probe(root, clips) {
-  window.__thumbMeta = { tex: collectTextures(root).length > 0, clips: clips || 0 };
+  let rig = false;
+  let parts = 0;
+  root.traverse((obj) => {
+    if (obj.isMesh) {
+      parts += 1;
+      if (obj.isSkinnedMesh) rig = true;
+    } else if (obj.isBone) {
+      rig = true;
+    }
+  });
+  window.__thumbMeta = { tex: collectTextures(root).length > 0, clips: clips || 0, rig, parts };
 }
 
 // A constructed model's textures decode asynchronously; wait until
