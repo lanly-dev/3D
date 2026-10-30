@@ -409,7 +409,6 @@ body.collapsed .grip { width: 4px; }
 .foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid var(--line);
@@ -417,7 +416,9 @@ body.collapsed .grip { width: 4px; }
   color: var(--fg-dim);
   font-size: 11px;
 }
-#status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+/* The status text takes the slack, so Refresh + Update group at the
+   right edge instead of spreading across the footer. */
+#status { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 /* The Update button hides while the app is current (sidebar.js sets
    .hidden from the update check that rides along with Refresh). */
 #update[hidden] { display: none; }
