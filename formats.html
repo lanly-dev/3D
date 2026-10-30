@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self';" />
+    <title>3D Format Guide</title>
+    <link rel="stylesheet" href="formats.css" />
+  </head>
+  <body>
+    <header>
+      <h1>3D format guide</h1>
+      <p class="sub">Same model, different packaging. Each format keeps a different
+      subset of the model — geometry, textures, rig, animation — so the right
+      choice depends on where the file is going.</p>
+    </header>
+
+    <section class="card">
+      <div class="card-head"><h2>GLB</h2><span class="tag rec">recommended</span></div>
+      <div class="caps"><span class="cap yes">Textures ✓</span><span class="cap yes">Animation ✓</span><span class="cap yes">Rig ✓</span></div>
+      <p>The all-in-one modern format (binary glTF). Geometry, PBR textures,
+      materials, rigging, and animation are embedded in a single file — nothing
+      travels separately, so nothing gets lost.</p>
+      <p class="best"><b>Best for:</b> web, games, and this app — the viewer,
+      thumbnails, and the Three.js converter all speak GLB natively.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>FBX</h2></div>
+      <div class="caps"><span class="cap yes">Textures ✓</span><span class="cap yes">Animation ✓</span><span class="cap yes">Rig ✓</span></div>
+      <p>Autodesk's professional format from the film and 3ds Max / Maya world.
+      Its strength is carrying rigs and multiple animation clips in one file.
+      Proprietary and a little bloated, but universally accepted by pro tools.</p>
+      <p class="best"><b>Best for:</b> Mixamo (it speaks FBX), Unity, Unreal,
+      and DCC tools like Maya or Blender.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>OBJ</h2></div>
+      <div class="caps"><span class="cap warn">Textures ~ separate files</span><span class="cap no">Animation ✗</span><span class="cap no">Rig ✗</span></div>
+      <p>The 30-year-old universal format: geometry as plain text. Materials and
+      textures live in separate loose files (a .mtl plus images) that are easy
+      to lose — which is why OBJs so often show up untextured. No animation,
+      no rig, ever.</p>
+      <p class="best"><b>Best for:</b> a simple static mesh that has to open
+      everywhere, including old software.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>STL</h2></div>
+      <div class="caps"><span class="cap no">Textures ✗</span><span class="cap no">Animation ✗</span><span class="cap no">Rig ✗</span></div>
+      <p>The 3D-printing format. Bare triangle soup: no color, no textures,
+      no units, no animation. It looks like nothing on screen because it was
+      never meant to be looked at — it describes a shape to a printer.</p>
+      <p class="best"><b>Best for:</b> 3D printing, and only that.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>USDZ</h2></div>
+      <div class="caps"><span class="cap yes">Textures ✓</span><span class="cap yes">Animation ✓</span><span class="cap no">Rig ~ limited</span></div>
+      <p>Apple and Pixar's format for augmented reality. Its party trick is
+      iOS Quick Look: tap the file on an iPhone and the model appears in the
+      room at real scale. Part of the broader USD scene format used in film.</p>
+      <p class="best"><b>Best for:</b> showing a model in AR on Apple devices.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>MP4</h2><span class="tag video">not a model</span></div>
+      <p>Not a 3D file at all — a rendered turntable <em>video</em> of the model.
+      Nobody can open it in a 3D tool, rotate it, or use it in a project.</p>
+      <p class="best"><b>Best for:</b> sharing and showcase posts.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>GIF</h2><span class="tag video">not a model</span></div>
+      <p>The same idea as MP4 but shorter, loopier, and lower quality: a small
+      looping clip of the model.</p>
+      <p class="best"><b>Best for:</b> Discord, chat, and README embeds.</p>
+    </section>
+
+    <footer>
+      <h2>Picking a download?</h2>
+      <p><b>GLB</b> for your own projects, <b>FBX</b> when it's headed to
+      Mixamo, <b>STL</b> to print, <b>MP4 / GIF</b> just to show somebody.</p>
+    </footer>
+  </body>
+</html>

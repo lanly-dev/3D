@@ -758,6 +758,34 @@ async function renderThumb(id) {
 }
 
 /**
+ * The 3D Format Guide (Help menu): a static beginner reference window
+ * explaining what each download format (GLB/FBX/OBJ/STL/USDZ/MP4/GIF)
+ * keeps and what it is for. Singleton — reopening focuses it.
+ */
+let formatsWin = null;
+function openFormatsGuide() {
+  if (formatsWin && !formatsWin.isDestroyed()) {
+    formatsWin.show();
+    formatsWin.focus();
+    return formatsWin;
+  }
+  formatsWin = new BrowserWindow({
+    width: 560,
+    height: 700,
+    minWidth: 420,
+    minHeight: 480,
+    title: '3D Format Guide',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  formatsWin.on('closed', () => { formatsWin = null; });
+  void formatsWin.loadFile(path.join(__dirname, 'formats.html'));
+  return formatsWin;
+}
+
+/**
  * Open a model in the in-app 3D viewer window (Three.js). The file path
  * travels as a URL query; the bytes travel over IPC when the page asks.
  */
@@ -1791,6 +1819,12 @@ function buildMenu() {
         },
       ],
     },
+    {
+      label: 'Help',
+      submenu: [
+        { label: '3D Format Guide…', click: () => openFormatsGuide() },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -2086,7 +2120,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide };
 
 /**
  * True when this file is the app's entry point.

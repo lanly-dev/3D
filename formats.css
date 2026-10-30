@@ -1,0 +1,73 @@
+/* 3D Format Guide window: static beginner reference, app theme tokens. */
+:root {
+  --bg: #14161b;
+  --bg-2: #1b1e25;
+  --bg-3: #232733;
+  --line: #2c313d;
+  --fg: #e7eaf0;
+  --fg-dim: #949cad;
+  --accent: #4c8dff;
+  --ok: #3ecf8e;
+  --warn: #f2b544;
+  --danger: #f2545b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.55 "Segoe UI", system-ui, sans-serif;
+}
+
+body { padding: 18px 20px 22px; }
+
+header h1 { font-size: 19px; margin: 0 0 6px; font-weight: 650; }
+.sub { color: var(--fg-dim); margin: 0 0 16px; }
+
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.card-head { display: flex; align-items: center; gap: 8px; }
+.card h2 { font-size: 15px; margin: 0; letter-spacing: .4px; }
+.card p { margin: 8px 0 0; }
+.card .best { color: var(--fg-dim); }
+.card .best b { color: var(--fg); }
+
+.tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(76, 141, 255, .16);
+  color: #bcd4ff;
+}
+.tag.video { background: var(--bg-3); color: var(--fg-dim); }
+
+.caps { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+.cap {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+}
+.cap.yes { color: var(--ok); }
+.cap.warn { color: var(--warn); }
+.cap.no { color: var(--fg-dim); }
+
+footer {
+  border: 1px solid rgba(76, 141, 255, .4);
+  background: rgba(76, 141, 255, .08);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-top: 14px;
+}
+footer h2 { font-size: 13px; margin: 0 0 4px; }
+footer p { margin: 0; }
