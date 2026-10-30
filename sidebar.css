@@ -396,6 +396,23 @@ body.collapsed .grip { width: 4px; }
 }
 .move-menu button:hover { background: var(--bg-2); }
 
+/* Feature filter popup (the + button): checkmark rows + a header. */
+.feature-menu .menu-head {
+  color: var(--fg-dim);
+  font-size: 11px;
+  padding: 5px 8px 3px;
+}
+.feature-menu .check {
+  display: inline-block;
+  width: 15px;
+  color: var(--ok);
+}
+.feature-btn.active {
+  background: rgba(76, 141, 255, .18);
+  border-color: var(--accent);
+  color: #bcd4ff;
+}
+
 .empty {
   color: var(--fg-dim);
   text-align: center;

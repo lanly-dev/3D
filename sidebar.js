@@ -7,6 +7,9 @@ const state = {
   assets: [],
   filter: '',
   kind: 'all',
+  /** Feature filters from the + popup: show only models carrying the
+   *  checked features (probed with their thumbnails). */
+  features: { tex: false, rig: false, anim: false },
   workspaces: [],
   activeId: null,
   /** 'all' | 'unassigned' | <workspace id> */
@@ -122,6 +125,13 @@ function visibleAssets() {
   const q = state.filter.trim().toLowerCase();
   return state.assets.filter((a) => {
     if (state.kind !== 'all' && a.kind !== state.kind) return false;
+    // Feature filters (the + popup): a checked feature must be present.
+    // Assets whose features were never probed (no thumbnail yet) count
+    // as not having it — they reappear once rendered, or when the
+    // filter is unchecked.
+    if (state.features.tex && !a.tex) return false;
+    if (state.features.rig && !a.rig) return false;
+    if (state.features.anim && !(a.clips > 0)) return false;
     if (state.scope === 'unassigned' && a.workspaceId) return false;
     if (state.scope !== 'all' && state.scope !== 'unassigned' && a.workspaceId !== state.scope) {
       return false;
@@ -396,8 +406,79 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ---- Feature filter popup (the + button next to the search box) ----
+// Checkmarks toggle the state.features flags; the list re-filters on
+// every toggle and the popup stays open so combos are one click apart.
+let featureMenuEl = null;
+const FEATURE_FILTERS = [
+  ['tex', 'Texture'],
+  ['rig', 'Rig'],
+  ['anim', 'Animation'],
+];
+
+function closeFeatureMenu() {
+  if (featureMenuEl) {
+    featureMenuEl.remove();
+    featureMenuEl = null;
+  }
+}
+
+function syncFeatureBtn() {
+  const on = FEATURE_FILTERS.filter(([k]) => state.features[k]).map(([, label]) => label);
+  const btn = $('feature-btn');
+  btn.classList.toggle('active', on.length > 0);
+  btn.title = on.length
+    ? `Feature filters on: ${on.join(', ')} — click to change`
+    : 'Filter by model features (texture, rig, animation)';
+}
+
+function openFeatureMenu() {
+  if (featureMenuEl) {
+    closeFeatureMenu();
+    return;
+  }
+  closeMoveMenu();
+  const menu = document.createElement('div');
+  menu.className = 'move-menu feature-menu';
+  const head = document.createElement('div');
+  head.className = 'menu-head';
+  head.textContent = 'Show only models with:';
+  menu.appendChild(head);
+  for (const [key, label] of FEATURE_FILTERS) {
+    const b = document.createElement('button');
+    const check = document.createElement('span');
+    check.className = 'check';
+    check.textContent = state.features[key] ? '✓' : '';
+    b.append(check, label);
+    b.addEventListener('click', () => {
+      state.features[key] = !state.features[key];
+      check.textContent = state.features[key] ? '✓' : '';
+      syncFeatureBtn();
+      renderList();
+    });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  const anchor = $('feature-btn');
+  const r = anchor.getBoundingClientRect();
+  let top = r.bottom + 4;
+  if (top + menu.offsetHeight > window.innerHeight) {
+    top = Math.max(4, r.top - menu.offsetHeight - 4);
+  }
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - menu.offsetWidth - 8, r.left)) + 'px';
+  menu.style.top = top + 'px';
+  featureMenuEl = menu;
+}
+
+document.addEventListener('click', (e) => {
+  if (featureMenuEl && !featureMenuEl.contains(e.target) && e.target.id !== 'feature-btn') {
+    closeFeatureMenu();
+  }
+});
+
 async function refresh() {
   closeMoveMenu();
+  closeFeatureMenu();
   const [wsData, assets] = await Promise.all([bridge.workspaces(), bridge.list()]);
   state.workspaces = wsData.workspaces || [];
   state.activeId = wsData.activeId || null;
@@ -496,6 +577,10 @@ $('search').addEventListener('input', (e) => {
 $('kind').addEventListener('change', (e) => {
   state.kind = e.target.value;
   renderList();
+});
+
+$('feature-btn').addEventListener('click', () => {
+  openFeatureMenu();
 });
 
 $('refresh').addEventListener('click', () => {
