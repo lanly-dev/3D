@@ -34,6 +34,7 @@ const SYNC_FILES = [
   'mixamo-export.html', 'mixamo-export.js',
   'thumb.html', 'thumb.css', 'thumb.js', 'thumbs.js',
   'formats.html', 'formats.css',
+  'assistant-bar.html', 'assistant-bar.css', 'assistant-bar.js', 'assistant-bar-preload.js',
 ];
 
 function gitPull(dir) {

@@ -1,0 +1,51 @@
+/* Assistant sub-tab strip — shown under the nav bar while the
+   Assistant site tab is active; picks between Copilot / Gemini /
+   Claude. Palette mirrors nav.css. */
+:root {
+  --bg: #14161b;
+  --bg-3: #232733;
+  --line: #2c313d;
+  --fg: #e7eaf0;
+  --fg-dim: #949cad;
+  --accent: #4c8dff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+}
+
+.asst-btn {
+  height: 22px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.asst-btn:hover { color: var(--fg); background: var(--bg-3); }
+
+.asst-btn.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}

@@ -57,6 +57,28 @@ const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'g
 const MIXAMO_IN_APP_HOSTS = ['mixamo.com', 'adobe.com', 'adobelogin.com'];
 const POLYPIZZA_IN_APP_HOSTS = ['poly.pizza'];
 
+// The Assistant site tab hosts three AI chat services under one nav
+// tab, picked from a sub-tab strip. `hosts` keeps each service's
+// login flow (SSO popups included) inside the app.
+const ASSISTANT_BAR_HEIGHT = 30;
+const ASSISTANTS = {
+  copilot: {
+    label: 'Copilot',
+    url: 'https://copilot.microsoft.com/',
+    hosts: ['copilot.microsoft.com', 'microsoft.com', 'live.com', 'microsoftonline.com', 'bing.com'],
+  },
+  gemini: {
+    label: 'Gemini',
+    url: 'https://gemini.google.com/',
+    hosts: ['gemini.google.com', 'google.com'],
+  },
+  claude: {
+    label: 'Claude',
+    url: 'https://claude.ai/',
+    hosts: ['claude.ai', 'anthropic.com', 'google.com'],
+  },
+};
+
 // Sidebar layout
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 520;
@@ -93,11 +115,16 @@ let siteView = null;
 let mixamoView = null;
 let pizzaView = null;
 let navView = null;
-/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza'. */
+let assistantBarView = null;
+const assistantViews = {};
+/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza' | 'assistant'. */
 let activeSite = 'hunyuan';
+/** Which assistant shows under the Assistant tab (persisted choice). */
+let activeAssistant = 'copilot';
 
 /** The site view the nav bar currently drives (history + zoom). */
 function activeView() {
+  if (activeSite === 'assistant') return assistantViews[activeAssistant] || siteView;
   if (activeSite === 'mixamo' && mixamoView) return mixamoView;
   if (activeSite === 'polypizza' && pizzaView) return pizzaView;
   return siteView;
@@ -105,9 +132,33 @@ function activeView() {
 
 /** Switch the content area between the site tabs. */
 function setActiveSite(name) {
-  activeSite = name === 'mixamo' || name === 'polypizza' ? name : 'hunyuan';
+  activeSite = ['mixamo', 'polypizza', 'assistant'].includes(name) ? name : 'hunyuan';
   layoutViews();
   pushNavState();
+}
+
+/** Switch which assistant the Assistant tab shows; the choice sticks. */
+function setActiveAssistant(name) {
+  if (!ASSISTANTS[name]) return;
+  activeAssistant = name;
+  settings.assistantTab = name;
+  saveSettings(settings);
+  layoutViews();
+  pushAssistantState();
+  pushNavState();
+}
+
+function pushAssistantState() {
+  if (!assistantBarView || assistantBarView.webContents.isDestroyed()) return;
+  assistantBarView.webContents.send('assistant:state', { active: activeAssistant });
+}
+
+/** Test hook: the Assistant tab's live geometry and visibility. */
+function assistantViewState() {
+  const info = (v) => (v ? { visible: v.getVisible(), bounds: v.getBounds(), url: v.webContents.getURL() } : null);
+  const views = {};
+  for (const [name, v] of Object.entries(assistantViews)) views[name] = info(v);
+  return { activeSite, activeAssistant, bar: info(assistantBarView), views };
 }
 const viewerWindows = new Set();
 let sidebarVisible = true;
@@ -1031,11 +1082,64 @@ function createMainWindow() {
   pizzaView.webContents.on('zoom-changed', pushNavState);
   pizzaView.setVisible(false);
 
+  // --- Assistant tab --------------------------------------------------
+  // Copilot / Gemini / Claude under one nav tab, picked from a sub-tab
+  // strip. All three share one persistent session, so each service's
+  // login survives restarts; downloads land in the workspace like the
+  // other tabs' do. Hidden until the Assistant tab is picked.
+  const assistantSes = session.fromPartition('persist:assistant');
+  assistantSes.setUserAgent(CHROME_UA);
+  attachDownloadHandler(assistantSes, 'Assistant', 'assistant-download');
+  if (settings.assistantTab && ASSISTANTS[settings.assistantTab]) {
+    activeAssistant = settings.assistantTab;
+  }
+  assistantBarView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'assistant-bar-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  assistantBarView.webContents.loadFile(path.join(__dirname, 'assistant-bar.html'));
+  assistantBarView.webContents.on('did-finish-load', pushAssistantState);
+  assistantBarView.setVisible(false);
+  for (const [name, def] of Object.entries(ASSISTANTS)) {
+    const v = new WebContentsView({
+      webPreferences: {
+        session: assistantSes,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    v.webContents.setUserAgent(CHROME_UA);
+    v.webContents.loadURL(def.url);
+    applyWindowOpenHandler(v.webContents, def.hosts);
+    attachWebContextMenu(v.webContents);
+    v.webContents.on('did-navigate', pushNavState);
+    v.webContents.on('did-navigate-in-page', pushNavState);
+    v.webContents.on('did-finish-load', () => {
+      if (settings.zoomFactor && settings.zoomFactor !== 1) {
+        try {
+          v.webContents.setZoomFactor(settings.zoomFactor);
+        } catch {
+          /* view going away — ignore */
+        }
+      }
+      pushNavState();
+    });
+    v.webContents.on('zoom-changed', pushNavState);
+    v.setVisible(false);
+    assistantViews[name] = v;
+  }
+
   win.contentView.addChildView(navView);
   win.contentView.addChildView(sidebarView);
   win.contentView.addChildView(siteView);
   win.contentView.addChildView(mixamoView);
   win.contentView.addChildView(pizzaView);
+  win.contentView.addChildView(assistantBarView);
+  for (const v of Object.values(assistantViews)) win.contentView.addChildView(v);
 
   layoutViews();
   win.on('resize', layoutViews);
@@ -1049,6 +1153,8 @@ function createMainWindow() {
     siteView = null;
     mixamoView = null;
     pizzaView = null;
+    assistantBarView = null;
+    for (const k of Object.keys(assistantViews)) delete assistantViews[k];
   });
 
   buildMenu();
@@ -1104,10 +1210,25 @@ function layoutViews() {
   const below = Math.max(0, h - NAV_BAR_HEIGHT);
   if (navView) navView.setBounds({ x: 0, y: 0, width: w, height: NAV_BAR_HEIGHT });
   sidebarView.setBounds({ x: 0, y: NAV_BAR_HEIGHT, width: sidebarW, height: below });
-  // The two site tabs share the content rect; only the active one shows.
-  const content = { x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: below };
+  // The Assistant tab adds a sub-tab strip under the nav bar; the
+  // content rect shrinks to make room for it while it shows.
+  const inAssistant = activeSite === 'assistant';
+  const barH = inAssistant ? ASSISTANT_BAR_HEIGHT : 0;
+  if (assistantBarView) {
+    try {
+      assistantBarView.setVisible(inAssistant);
+      if (inAssistant) {
+        assistantBarView.setBounds({ x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: ASSISTANT_BAR_HEIGHT });
+      }
+    } catch {
+      /* view going away — ignore */
+    }
+  }
+  // The site tabs and assistant views share the content rect; only
+  // the active one shows.
+  const content = { x: sidebarW, y: NAV_BAR_HEIGHT + barH, width: Math.max(0, w - sidebarW), height: Math.max(0, below - barH) };
   const active = activeView();
-  for (const v of [siteView, mixamoView, pizzaView]) {
+  for (const v of [siteView, mixamoView, pizzaView, ...Object.values(assistantViews)]) {
     if (!v) continue;
     const isActive = v === active;
     try {
@@ -1898,6 +2019,7 @@ function registerIpc() {
   ipcMain.on('nav:zoomOut', () => stepZoom(-1));
   ipcMain.on('nav:zoomReset', () => applyZoom(1));
   ipcMain.on('nav:switchSite', (_e, name) => setActiveSite(name));
+  ipcMain.on('assistant:set', (_e, name) => setActiveAssistant(name));
 
   ipcMain.handle('assets:list', (_e, workspaceId) => {
     const list = assets.list(workspaceId || null);
@@ -2216,7 +2338,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer, assistantViewState, ASSISTANTS };
 
 /**
  * True when this file is the app's entry point.
