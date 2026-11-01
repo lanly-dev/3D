@@ -148,6 +148,15 @@ function fitCamera(root) {
   controls.target.set(0, 0, 0);
   controls.update();
   grid.position.y = box.min.y - center.y - 0.001;
+  // The grid is sized relative to the model: it spans 3x the model's
+  // footprint, the 20 divisions scaling with it — a huge model no
+  // longer swallows the fixed 20-unit grid, and a tiny one no longer
+  // drowns in it. (The helper's geometry spans +/-10, hence /20.)
+  const footprint = Math.max(size.x, size.z) || 1;
+  const gs = (footprint * 3) / 20;
+  grid.scale.set(gs, 1, gs);
+  window.__gridSpan = footprint * 3;
+  window.__modelFootprint = footprint;
 }
 
 // Animation playback (FBX and GLB files can carry clips — Mixamo
