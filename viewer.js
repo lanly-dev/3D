@@ -10,6 +10,10 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 const filePath = new URLSearchParams(window.location.search).get('file') || '';
 const fileName = filePath.split(/[\\/]/).pop() || 'Model';
@@ -57,6 +61,23 @@ scene.add(fillLight);
 
 const grid = new THREE.GridHelper(20, 20, 0x3a4050, 0x232733);
 scene.add(grid);
+
+// Rendering goes through a composer so part highlighting can be an
+// OUTLINE glow (Lan's call) instead of tinting the whole part: the
+// scene renders normally, then OutlinePass draws a glowing contour
+// around the selected part only. OutputPass applies the renderer's
+// tone mapping / color space as the final step, as a direct render
+// would.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const outlinePass = new OutlinePass(new THREE.Vector2(viewport.clientWidth, viewport.clientHeight), scene, camera);
+outlinePass.visibleEdgeColor.set(0x4c8dff);
+outlinePass.hiddenEdgeColor.set(0x1d3f7d);
+outlinePass.edgeStrength = 4;
+outlinePass.edgeGlow = 0.7;
+outlinePass.edgeThickness = 2;
+composer.addPass(outlinePass);
+composer.addPass(new OutputPass());
 
 let model = null;
 let wireframeOn = false;
@@ -190,7 +211,7 @@ animClipSel.addEventListener('change', () => playClip(Number(animClipSel.value))
 function showObject(obj, anims) {
   if (model) scene.remove(model);
   if (highlightedPart) {
-    unhighlightPart(highlightedPart);
+    unhighlightPart();
     highlightedPart = null;
   }
   if (mixer) {
@@ -285,10 +306,9 @@ function renderPartsList() {
 
 function highlightPart(p) {
   if (highlightedPart === p) {
-    unhighlightPart(p);
+    unhighlightPart();
     highlightedPart = null;
   } else {
-    if (highlightedPart) unhighlightPart(highlightedPart);
     applyHighlight(p);
     highlightedPart = p;
   }
@@ -319,35 +339,14 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (!hits.length) highlightPart(highlightedPart); // toggle off + refresh
 });
 
+// The highlight is the composer's OutlinePass selection: just the
+// part's contour glows; its surfaces keep their real materials.
 function applyHighlight(p) {
-  p.mesh.traverse((obj) => {
-    if (!obj.isMesh || !obj.material) return;
-    // Clone materials so shared materials aren't affected
-    const origMats = Array.isArray(obj.material) ? obj.material : [obj.material];
-    const newMats = origMats.map((m) => {
-      const clone = m.clone();
-      if (clone.emissive) {
-        clone.emissive.set(0x4c8dff);
-        clone.emissiveIntensity = 0.6;
-      } else if (clone.color) {
-        clone.color.set(0x4c8dff);
-      }
-      clone.needsUpdate = true;
-      return clone;
-    });
-    obj.__origMaterial = obj.material;
-    obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
-  });
+  outlinePass.selectedObjects = [p.mesh];
 }
 
-function unhighlightPart(p) {
-  p.mesh.traverse((obj) => {
-    if (!obj.isMesh || !obj.material) return;
-    if (obj.__origMaterial) {
-      obj.material = obj.__origMaterial;
-      delete obj.__origMaterial;
-    }
-  });
+function unhighlightPart() {
+  outlinePass.selectedObjects = [];
 }
 
 function showError(err) {
@@ -501,7 +500,7 @@ function showViewerToast(msg) {
 }
 document.getElementById('screenshot').addEventListener('click', async () => {
   try {
-    renderer.render(scene, camera);
+    composer.render();
     const blob = await new Promise((resolve) => renderer.domElement.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('empty capture');
     const buf = await blob.arrayBuffer();
@@ -521,6 +520,7 @@ window.addEventListener('resize', () => {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
+  composer.setSize(w, h);
 });
 
 function animate() {
@@ -532,7 +532,7 @@ function animate() {
     if (window.__viewerAnim) window.__viewerAnim.time = action.time;
   }
   controls.update();
-  renderer.render(scene, camera);
+  composer.render();
 }
 animate();
 load();
