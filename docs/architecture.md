@@ -2,7 +2,7 @@
 
 ## What this is
 
-A desktop wrapper around the Hunyuan3D web app (`https://3d.hunyuan.tencent.com/`).
+3D Kits (renamed from Hunyuan3D Desktop on 2026-11-01) — a desktop workshop around the Hunyuan3D web app (`https://3d.hunyuan.tencent.com/`) and friends. The packaged build pins its userData to the pre-rename `Hunyuan3D` folder so the rename doesn't strand logins or the asset index.
 Keeps the login session alive across restarts, tracks downloaded models in
 workspaces, converts them to Three.js code (glb2ts), and prepares them for
 Mixamo.

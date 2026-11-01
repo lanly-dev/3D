@@ -1,5 +1,5 @@
 /**
- * Hunyuan3D Desktop — a personal desktop wrapper around the Hunyuan3D web app.
+ * 3D Kits — a personal desktop workshop wrapping the Hunyuan3D web app.
  *
  * What it does:
  *  - Loads https://3d.hunyuan.tencent.com/ in a real Chromium shell.
@@ -44,10 +44,19 @@ const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
 const updater = require('./updater');
 
+// The app was renamed to "3D Kits", but its data predates the name:
+// the packaged build's userData folder (logins, settings, the asset
+// index) was created under the old name. Pin that folder while
+// packaged so a renamed executable doesn't strand the data in a
+// fresh, empty profile. (Unpackaged dev/test runs keep the default.)
+if (app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'Hunyuan3D'));
+}
+
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
 const MIXAMO_URL = 'https://www.mixamo.com/';
 const POLYPIZZA_URL = 'https://poly.pizza/';
-const APP_TITLE = 'Hunyuan3D';
+const APP_TITLE = '3D Kits';
 // Chrome UA (the raw Electron UA makes many sites serve broken pages).
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
@@ -1747,7 +1756,7 @@ async function convertLastDownloadToTs(mode) {
     : {};
   const msg = await convertFileToTs(lastDownloadPath, opts);
   pushSidebarStatus(msg);
-  new Notification({ title: 'Hunyuan3D', body: msg }).show();
+  new Notification({ title: APP_TITLE, body: msg }).show();
 }
 
 /** Ask for a workspace name, then create it (folder can be set later). */
@@ -1842,7 +1851,7 @@ async function deleteAssetFile(id) {
 function buildMenu() {
   const template = [
     {
-      label: 'Hunyuan3D',
+      label: APP_TITLE,
       submenu: [
         { label: 'Home', click: () => focusedWebContents()?.loadURL(HOME_URL) },
         {
@@ -1910,7 +1919,7 @@ function buildMenu() {
             const added = assets.scanFolder(folder);
             notifySidebar();
             new Notification({
-              title: 'Hunyuan3D',
+              title: APP_TITLE,
               body: added.length
                 ? `Added ${added.length} file(s) to ${ws ? ws.name : 'the asset manager'}`
                 : 'No new files found',
@@ -1923,7 +1932,7 @@ function buildMenu() {
             const added = assets.scanFolder(app.getPath('downloads'));
             notifySidebar();
             new Notification({
-              title: 'Hunyuan3D',
+              title: APP_TITLE,
               body: added.length
                 ? `Added ${added.length} file(s) to the asset manager`
                 : 'No new files found in Downloads',

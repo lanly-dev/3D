@@ -195,7 +195,7 @@ function renderStats(stats) {
   $('ws-select').title = `Active workspace — new downloads save here\n${counts}`;
   $('subtitle').textContent = stats.lastAsset
     ? `Last: ${stats.lastAsset.name}`
-    : 'Hunyuan3D';
+    : '3D Kits';
 }
 
 function renderList() {

@@ -1,4 +1,4 @@
-# Hunyuan3D Desktop
+# 3D Kits
 
 A small desktop wrapper around the Hunyuan3D web app
 (`https://3d.hunyuan.tencent.com/`), with a local asset sidebar.
@@ -9,7 +9,7 @@ A small desktop wrapper around the Hunyuan3D web app
   across restarts (persistent partition `persist:hunyuan3d`).
 - Login popups open in-app; other external links open in the system browser.
 - Downloads (GLB/OBJ) auto-save into the active workspace folder.
-- **Translate site to English** (Hunyuan3D menu) — the site ships
+- **Translate site to English** (3D Kits menu) — the site ships
   Chinese-first, so this restarts the app asking for English (en-US locale
   + `Accept-Language`) and machine-translates whatever still renders in
   Chinese with a small built-in translator that calls Google Translate's
@@ -97,5 +97,5 @@ npm start
 npm run package-win
 ```
 
-Output: `dist/Hunyuan3D-win32-x64/`. The build is unsigned — on first launch
+Output: `dist/3D Kits-win32-x64/`. The build is unsigned — on first launch
 SmartScreen will warn; click **More info → Run anyway**.

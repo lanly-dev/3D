@@ -138,7 +138,7 @@ function ensureDefault() {
   const ws = create({
     name: 'Default',
     folder: app.getPath('downloads'),
-    notes: 'Where Hunyuan3D downloads land by default.',
+    notes: 'Where 3D Kits downloads land by default.',
   });
   return ws;
 }
