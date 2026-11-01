@@ -3,7 +3,7 @@
 // and reflects the active assistant it is sent.
 const bridge = window.assistantApi;
 
-const NAMES = ['copilot', 'gemini', 'claude'];
+const NAMES = ['copilot', 'gemini', 'claude', 'muse', 'boba'];
 for (const name of NAMES) {
   document.getElementById(`asst-${name}`).addEventListener('click', () => bridge.setAssistant(name));
 }

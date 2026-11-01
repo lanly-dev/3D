@@ -28,7 +28,7 @@ Mixamo.
 | `assistant-bar.html` / `assistant-bar.css` / `assistant-bar.js` / `assistant-bar-preload.js` | Sub-tab strip for the Assistant site tab: Copilot / Gemini / Claude picker |
 | `package.json` | Scripts: `npm start`, `npm run package-win` |
 
-The content area hosts four site tabs, switched from the nav bar: Hunyuan3D (`persist:hunyuan3d`), Mixamo (`persist:mixamo`, its own Adobe ID login), Poly Pizza (`persist:polypizza`, free premade low-poly models with direct .glb downloads), and Assistant — Copilot, Gemini and Claude sharing one session (`persist:assistant`) under a sub-tab strip, with the last-picked assistant persisted in settings. Downloads from any session land in the active workspace and are tracked as assets. "Prepare for Mixamo upload" (asset context menu / Tools) writes `<name>.mixamo.obj` next to the model; the viewer plays animation clips carried by FBX/GLB files (Mixamo downloads) with a play/pause + clip-picker bar.
+The content area hosts four site tabs, switched from the nav bar: Hunyuan3D (`persist:hunyuan3d`), Mixamo (`persist:mixamo`, its own Adobe ID login), Poly Pizza (`persist:polypizza`, free premade low-poly models with direct .glb downloads), and Assistant — Copilot, Gemini, Claude, Muse and Boba sharing one session (`persist:assistant`) under a sub-tab strip, with the last-picked assistant persisted in settings. Downloads from any session land in the active workspace and are tracked as assets. "Prepare for Mixamo upload" (asset context menu / Tools) writes `<name>.mixamo.obj` next to the model; the viewer plays animation clips carried by FBX/GLB files (Mixamo downloads) with a play/pause + clip-picker bar.
 
 ## Conventions
 

@@ -77,6 +77,16 @@ const ASSISTANTS = {
     url: 'https://claude.ai/',
     hosts: ['claude.ai', 'anthropic.com', 'google.com'],
   },
+  muse: {
+    label: 'Muse',
+    url: 'https://muse.ai/',
+    hosts: ['muse.ai', 'meta.com', 'facebook.com', 'instagram.com', 'accountscenter.com'],
+  },
+  boba: {
+    label: 'Boba',
+    url: 'https://boba.app/',
+    hosts: ['boba.app', 'getboba.ai'],
+  },
 };
 
 // Sidebar layout
