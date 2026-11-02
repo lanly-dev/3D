@@ -59,6 +59,52 @@ const POLYPIZZA_URL = 'https://poly.pizza/';
 const APP_TITLE = '3D Kits';
 // Chrome UA (the raw Electron UA makes many sites serve broken pages).
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
+// The client-hint metadata matching CHROME_UA. Chromium derives
+// navigator.userAgentData / Sec-CH-UA from the real engine (brand
+// "Chromium", no "Google Chrome"), which contradicts the UA string
+// above — and sign-in environment checks (Google's "browser or app
+// may not be secure") compare the two. app.userAgentFallback does
+// NOT move the hints (probed 2026-11-01); only a DevTools-protocol
+// Emulation.setUserAgentOverride with full metadata does.
+const CHROME_UA_METADATA = {
+  brands: [
+    { brand: 'Google Chrome', version: '138' },
+    { brand: 'Chromium', version: '138' },
+    { brand: 'Not)A;Brand', version: '24' },
+  ],
+  fullVersionList: [
+    { brand: 'Google Chrome', version: '138.0.7204.97' },
+    { brand: 'Chromium', version: '138.0.7204.97' },
+    { brand: 'Not)A;Brand', version: '24.0.0.0' },
+  ],
+  platform: 'Windows',
+  platformVersion: '15.0.0',
+  architecture: 'x86',
+  model: '',
+  mobile: false,
+};
+
+// Make a webContents present the full Chrome identity, hints
+// included. The command can't land before the target's first
+// navigation commits ("target closed"), so it is attempted
+// immediately and re-asserted on every top-level navigation; the
+// override state itself persists across navigations once set.
+// Opening DevTools on the view detaches this debugger — the next
+// navigation re-attaches and re-asserts.
+function applyChromeIdentity(contents) {
+  const send = () => {
+    try {
+      const dbg = contents.debugger;
+      if (!dbg.isAttached()) dbg.attach('1.3');
+      dbg.sendCommand('Emulation.setUserAgentOverride', {
+        userAgent: CHROME_UA,
+        userAgentMetadata: CHROME_UA_METADATA,
+      }).catch(() => {});
+    } catch { /* contents already gone */ }
+  };
+  send();
+  contents.on('did-navigate', send);
+}
 
 // Domains that belong to the login/app flow and should stay in-app.
 const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'gtimg.com', 'qpic.cn'];
@@ -653,6 +699,7 @@ function applyWindowOpenHandler(contents, hosts = IN_APP_HOSTS, css = null) {
       }
       const child = new BrowserWindow(childWindowOptions(contents.session));
       child.webContents.setUserAgent(CHROME_UA);
+      applyChromeIdentity(child.webContents);
       child.loadURL(url);
       applyWindowOpenHandler(child.webContents, hosts, css);
       if (css) injectScrollbarStyle(child.webContents, css);
@@ -1011,6 +1058,7 @@ function createMainWindow() {
     },
   });
   siteView.webContents.setUserAgent(CHROME_UA);
+  applyChromeIdentity(siteView.webContents);
   siteView.webContents.loadURL(HOME_URL);
   applyWindowOpenHandler(siteView.webContents, IN_APP_HOSTS, HUNYUAN_SCROLLBAR_CSS);
   injectScrollbarStyle(siteView.webContents, HUNYUAN_SCROLLBAR_CSS);
@@ -1053,6 +1101,7 @@ function createMainWindow() {
     },
   });
   mixamoView.webContents.setUserAgent(CHROME_UA);
+  applyChromeIdentity(mixamoView.webContents);
   mixamoView.webContents.loadURL(MIXAMO_URL);
   applyWindowOpenHandler(mixamoView.webContents, MIXAMO_IN_APP_HOSTS, MIXAMO_SCROLLBAR_CSS);
   injectScrollbarStyle(mixamoView.webContents, MIXAMO_SCROLLBAR_CSS);
@@ -1083,6 +1132,7 @@ function createMainWindow() {
     },
   });
   pizzaView.webContents.setUserAgent(CHROME_UA);
+  applyChromeIdentity(pizzaView.webContents);
   pizzaView.webContents.loadURL(POLYPIZZA_URL);
   applyWindowOpenHandler(pizzaView.webContents, POLYPIZZA_IN_APP_HOSTS);
   attachWebContextMenu(pizzaView.webContents);
@@ -1132,6 +1182,7 @@ function createMainWindow() {
       },
     });
     v.webContents.setUserAgent(CHROME_UA);
+    applyChromeIdentity(v.webContents);
     v.webContents.loadURL(def.url);
     applyWindowOpenHandler(v.webContents, def.hosts);
     attachWebContextMenu(v.webContents);
