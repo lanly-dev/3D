@@ -1010,6 +1010,38 @@ function createMainWindow() {
   const pizzaSes = session.fromPartition('persist:polypizza');
   pizzaSes.setUserAgent(CHROME_UA);
   attachDownloadHandler(pizzaSes, 'Poly Pizza', 'polypizza-model.glb');
+  // Poly Pizza's whole login is one first-party cookie, and it is a
+  // session cookie — Chromium drops those at shutdown even on a
+  // persist: partition, so the login never survived a restart
+  // (diagnosed 2026-11-02). Promote poly.pizza session cookies to
+  // persistent ones (30 days) so the login sticks like the other
+  // tabs'. If their server-side session dies sooner, the cookie
+  // simply stops being accepted. Re-setting fires 'changed' again
+  // with session:false, so this cannot loop.
+  const promotePizzaCookie = (cookie) => {
+    if (!cookie.session) return;
+    const host = (cookie.domain || '').replace(/^\./, '');
+    if (host !== 'poly.pizza' && !host.endsWith('.poly.pizza')) return;
+    pizzaSes.cookies.set({
+      url: `${cookie.secure ? 'https' : 'http'}://${host}${cookie.path || '/'}`,
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      secure: cookie.secure,
+      httpOnly: cookie.httpOnly,
+      sameSite: cookie.sameSite,
+      expirationDate: Math.floor((Date.now() + 30 * 24 * 60 * 60 * 1000) / 1000),
+    }).catch(() => {});
+  };
+  const sweepPizzaCookies = () => {
+    pizzaSes.cookies.get({ domain: 'poly.pizza' })
+      .then((all) => all.forEach(promotePizzaCookie)).catch(() => {});
+  };
+  pizzaSes.cookies.on('changed', (_e, cookie, _cause, removed) => {
+    if (!removed) promotePizzaCookie(cookie);
+  });
+  sweepPizzaCookies();
 
   const win = new BrowserWindow({
     width: 1440,
@@ -1139,6 +1171,7 @@ function createMainWindow() {
   pizzaView.webContents.on('did-navigate', pushNavState);
   pizzaView.webContents.on('did-navigate-in-page', pushNavState);
   pizzaView.webContents.on('did-finish-load', () => {
+    sweepPizzaCookies();
     if (settings.zoomFactor && settings.zoomFactor !== 1) {
       try {
         pizzaView.webContents.setZoomFactor(settings.zoomFactor);
