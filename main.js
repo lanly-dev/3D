@@ -106,6 +106,25 @@ function applyChromeIdentity(contents) {
   contents.on('did-navigate', send);
 }
 
+// Fallback drag icon (48x48 slate PNG) for files with no readable
+// image of their own — Windows requires a non-empty drag icon.
+const DRAG_ICON_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAZElEQVR4AdXBMQEAIAzAsK4qOZGA/4fpaDLnvk+YxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxEmcxC3PCAKHJnFRywAAAABJRU5ErkJggg==';
+
+// Which file a sidebar drag carries for an asset: images drag
+// themselves; models drag their rendered thumbnail PNG when one is
+// cached (chat assistants reject .glb attachments, and the picture
+// is what he wants to show them anyway), falling back to the model
+// file itself; everything else drags its own file.
+function dragFileForAsset(asset) {
+  if (!asset || !asset.filePath) return null;
+  const ext = path.extname(asset.filePath).toLowerCase();
+  if (assets.MODEL_EXTS.includes(ext)) {
+    const thumb = thumbs.thumbPath(asset.id);
+    if (fs.existsSync(thumb)) return thumb;
+  }
+  return asset.filePath;
+}
+
 // Domains that belong to the login/app flow and should stay in-app.
 const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'gtimg.com', 'qpic.cn'];
 // Mixamo sign-in runs through Adobe ID — its hosts stay in-app too.
@@ -2295,6 +2314,22 @@ function registerIpc() {
     if (!p || !fs.existsSync(p)) return false;
     return shell.openPath(p).then(() => true).catch(() => false);
   });
+  // Drag a sidebar item out of the app (onto an Assistant tab, or
+  // any other app): an OS-level file drag, started here because
+  // HTML drags cannot cross between views.
+  ipcMain.on('assets:startDrag', (event, id) => {
+    const found = assets.find(String(id || ''));
+    const file = dragFileForAsset(found);
+    if (!file || !fs.existsSync(file)) return;
+    let icon = nativeImage.createFromPath(file);
+    if (icon.isEmpty() && found) icon = nativeImage.createFromPath(thumbs.thumbPath(found.id));
+    if (!icon.isEmpty()) {
+      const s = icon.getSize();
+      if (s.width > 96 || s.height > 96) icon = icon.resize({ width: 96 });
+    }
+    if (icon.isEmpty()) icon = nativeImage.createFromBuffer(Buffer.from(DRAG_ICON_PNG_B64, 'base64'));
+    try { event.sender.startDrag({ file, icon }); } catch { /* no drag */ }
+  });
   // Open an asset: models go to the in-app 3D viewer, everything else to
   // the machine's default app.
   ipcMain.handle('assets:view', (_e, id) => {
@@ -2441,7 +2476,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer, assistantViewState, ASSISTANTS };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer, assistantViewState, ASSISTANTS, dragFileForAsset };
 
 /**
  * True when this file is the app's entry point.

@@ -226,6 +226,16 @@ function renderList() {
       }
       bridge.assetMenu(a.id);
     });
+    // Native file drag out of the sidebar: onto an Assistant tab to
+    // show the item to an AI, or into any other app. HTML drags
+    // can't cross views, so the main process starts an OS file drag
+    // and picks the payload (models carry their thumbnail image).
+    el.draggable = true;
+    el.addEventListener('dragstart', (e) => {
+      if (e.target.closest('input, textarea, select')) return;
+      e.preventDefault();
+      if (typeof bridge.startDrag === 'function') bridge.startDrag(a.id);
+    });
 
     const top = document.createElement('div');
     top.className = 'item-top';
