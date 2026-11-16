@@ -25,7 +25,7 @@ const RAW_BASE = 'https://raw.githubusercontent.com/lanly-dev/3D/main';
 // The app's runtime files (the push script's FILES minus repo-only
 // docs/meta). updater.js lists itself so it can update too.
 const SYNC_FILES = [
-  'main.js', 'updater.js', 'glb2ts.mjs', 'package.json',
+  'main.js', 'updater.js', 'rig.js', 'glb2ts.mjs', 'package.json',
   'sidebar.html', 'sidebar.js', 'sidebar-preload.js', 'sidebar.css',
   'assets.js', 'workspaces.js',
   'nav.html', 'nav.css', 'nav.js', 'nav-preload.js',

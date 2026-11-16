@@ -43,6 +43,7 @@ const assets = require('./assets');
 const thumbs = require('./thumbs');
 const workspaces = require('./workspaces');
 const updater = require('./updater');
+const rig = require('./rig');
 
 // The app was renamed to "3D Kits", but its data predates the name:
 // the packaged build's userData folder (logins, settings, the asset
@@ -1834,6 +1835,59 @@ async function exportForMixamo(filePath) {
   }
 }
 
+// --- Local rigging engine (RigAnything, app-managed) -----------------
+let rigEngineInstance = null;
+function rigEngine() {
+  if (!rigEngineInstance) {
+    rigEngineInstance = rig.createRigEngine({
+      rootDir: process.env.H3D_RIG_ENGINE_DIR || path.join(app.getPath('userData'), 'rig-engine'),
+    });
+  }
+  return rigEngineInstance;
+}
+
+/**
+ * Asset-menu "Rig (local)": rig a fused model with the app-managed
+ * RigAnything engine (see rig.js). First use offers the one-click
+ * engine install — a multi-GB, resumable download into the app's
+ * data folder; once installed, the rig runs locally on the GPU and
+ * the rigged GLB + joints/weights npz land next to the source model
+ * as tracked assets. Returns a status message.
+ */
+async function rigAsset(assetRecord) {
+  const name = path.basename(assetRecord.filePath);
+  const engine = rigEngine();
+  const st = engine.status();
+  if (st.state === 'unsupported') return st.reason;
+  if (st.state !== 'ready') {
+    const win = focusedWindow();
+    const res = await dialog.showMessageBox(win, {
+      type: 'info',
+      message: 'Install the local rigging engine?',
+      detail:
+        'Rig (local) uses RigAnything, running entirely on your machine. ' +
+        'The app will download a portable Python, PyTorch (CUDA) and the ' +
+        'RigAnything checkpoint into its own data folder — several GB, ' +
+        'one time, and resumable if interrupted. No terminal needed.',
+      buttons: ['Install', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (res.response !== 0) return 'Rig (local): engine install cancelled';
+    const installed = await engine.install((label) => pushSidebarStatus(label));
+    if (!installed.ok) return `Rig engine install failed: ${installed.message}`;
+    return 'Rigging engine installed — right-click the model again and choose Rig (local) to rig it';
+  }
+  pushSidebarStatus(`Rigging ${name} — running locally, this can take a few minutes…`);
+  const res = await engine.run(assetRecord.filePath, (label) => pushSidebarStatus(`Rigging ${name}: ${label}`));
+  if (res.ok) {
+    assets.track(res.riggedPath);
+    assets.track(res.npzPath);
+    notifySidebar();
+  }
+  return res.message;
+}
+
 async function prepareLastDownloadForMixamo() {
   if (!lastDownloadPath || !fs.existsSync(lastDownloadPath)) {
     pushSidebarStatus('Prepare for Mixamo: no download yet this session');
@@ -2286,6 +2340,12 @@ function registerIpc() {
           exportForMixamo(found.filePath).then((msg) => pushSidebarStatus(msg)).catch(() => {});
         },
       });
+      items.push({
+        label: 'Rig (local)',
+        click: () => {
+          rigAsset(found).then((msg) => pushSidebarStatus(msg)).catch(() => {});
+        },
+      });
     }
     items.push(
       { type: 'separator' },
@@ -2476,7 +2536,7 @@ function registerIpc() {
   });
 }
 
-module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer, assistantViewState, ASSISTANTS, dragFileForAsset };
+module.exports = { registerIpc, createMainWindow, buildMenu, isConvertedCodeFile, injectScrollbarStyle, MIXAMO_SCROLLBAR_CSS, toggleFocusedDevTools, buildWebContextMenu, showToast, toastViewState, openFormatsGuide, openViewer, assistantViewState, ASSISTANTS, dragFileForAsset, rigEngine };
 
 /**
  * True when this file is the app's entry point.
