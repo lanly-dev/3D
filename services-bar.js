@@ -3,7 +3,7 @@
 // forwards clicks and reflects the active service it is sent.
 const bridge = window.servicesApi;
 
-const NAMES = ['hunyuan', 'mixamo', 'polypizza'];
+const NAMES = ['hunyuan', 'mixamo', 'polypizza', 'meshy'];
 for (const name of NAMES) {
   document.getElementById(`svc-${name}`).addEventListener('click', () => bridge.setService(name));
 }

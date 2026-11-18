@@ -27,7 +27,7 @@ forwardBtn.disabled = true;
 
 bridge.onState((state) => {
   if (state.site) {
-    // The Services tab owns the three 3D sites; Assistant is its own tab.
+    // The Services tab owns the four 3D sites; Assistant is its own tab.
     tabServices.classList.toggle('active', state.site !== 'assistant');
     tabAssistant.classList.toggle('active', state.site === 'assistant');
   }

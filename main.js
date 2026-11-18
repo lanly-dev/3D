@@ -57,6 +57,7 @@ if (app.isPackaged) {
 const HOME_URL = 'https://3d.hunyuan.tencent.com/';
 const MIXAMO_URL = 'https://www.mixamo.com/';
 const POLYPIZZA_URL = 'https://poly.pizza/';
+const MESHY_URL = 'https://www.meshy.ai/';
 const APP_TITLE = '3D Kits';
 // Chrome UA (the raw Electron UA makes many sites serve broken pages).
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
@@ -131,6 +132,8 @@ const IN_APP_HOSTS = ['tencent.com', 'qq.com', 'weixin.qq.com', 'wechat.com', 'g
 // Mixamo sign-in runs through Adobe ID — its hosts stay in-app too.
 const MIXAMO_IN_APP_HOSTS = ['mixamo.com', 'adobe.com', 'adobelogin.com'];
 const POLYPIZZA_IN_APP_HOSTS = ['poly.pizza'];
+// Meshy signs in on its own auth host and through Google / Discord OAuth.
+const MESHY_IN_APP_HOSTS = ['meshy.ai', 'google.com', 'discord.com', 'discordapp.com'];
 
 // The Assistant site tab hosts three AI chat services under one nav
 // tab, picked from a sub-tab strip. `hosts` keeps each service's
@@ -164,10 +167,10 @@ const ASSISTANTS = {
   },
 };
 
-// The nav bar's Services tab hosts the three 3D sites under one tab,
+// The nav bar's Services tab hosts the four 3D sites under one tab,
 // picked from a sub-tab strip exactly like the Assistant tab's.
 const SERVICES_BAR_HEIGHT = 30;
-const SERVICE_SITES = ['hunyuan', 'mixamo', 'polypizza'];
+const SERVICE_SITES = ['hunyuan', 'mixamo', 'polypizza', 'meshy'];
 
 // Sidebar layout
 const SIDEBAR_MIN_WIDTH = 200;
@@ -204,11 +207,12 @@ let sidebarView = null;
 let siteView = null;
 let mixamoView = null;
 let pizzaView = null;
+let meshyView = null;
 let navView = null;
 let assistantBarView = null;
 let servicesBarView = null;
 const assistantViews = {};
-/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza' | 'assistant'. */
+/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza' | 'meshy' | 'assistant'. */
 let activeSite = 'hunyuan';
 /** Which assistant shows under the Assistant tab (persisted choice). */
 let activeAssistant = 'copilot';
@@ -220,6 +224,7 @@ function activeView() {
   if (activeSite === 'assistant') return assistantViews[activeAssistant] || siteView;
   if (activeSite === 'mixamo' && mixamoView) return mixamoView;
   if (activeSite === 'polypizza' && pizzaView) return pizzaView;
+  if (activeSite === 'meshy' && meshyView) return meshyView;
   return siteView;
 }
 
@@ -1065,6 +1070,9 @@ function createMainWindow() {
   const pizzaSes = session.fromPartition('persist:polypizza');
   pizzaSes.setUserAgent(CHROME_UA);
   attachDownloadHandler(pizzaSes, 'Poly Pizza', 'polypizza-model.glb');
+  const meshySes = session.fromPartition('persist:meshy');
+  meshySes.setUserAgent(CHROME_UA);
+  attachDownloadHandler(meshySes, 'Meshy', 'meshy-model.glb');
   // Poly Pizza's whole login is one first-party cookie, and it is a
   // session cookie — Chromium drops those at shutdown even on a
   // persist: partition, so the login never survived a restart
@@ -1239,6 +1247,36 @@ function createMainWindow() {
   pizzaView.webContents.on('zoom-changed', pushNavState);
   pizzaView.setVisible(false);
 
+  // --- Meshy tab --------------------------------------------------------
+  // AI text/image-to-3D generation with direct .glb / .fbx / .obj
+  // exports, on its own persistent session so the login survives restarts.
+  meshyView = new WebContentsView({
+    webPreferences: {
+      session: meshySes,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  meshyView.webContents.setUserAgent(CHROME_UA);
+  applyChromeIdentity(meshyView.webContents);
+  meshyView.webContents.loadURL(MESHY_URL);
+  applyWindowOpenHandler(meshyView.webContents, MESHY_IN_APP_HOSTS);
+  attachWebContextMenu(meshyView.webContents);
+  meshyView.webContents.on('did-navigate', pushNavState);
+  meshyView.webContents.on('did-navigate-in-page', pushNavState);
+  meshyView.webContents.on('did-finish-load', () => {
+    if (settings.zoomFactor && settings.zoomFactor !== 1) {
+      try {
+        meshyView.webContents.setZoomFactor(settings.zoomFactor);
+      } catch {
+        /* view going away — ignore */
+      }
+    }
+    pushNavState();
+  });
+  meshyView.webContents.on('zoom-changed', pushNavState);
+  meshyView.setVisible(false);
+
   // --- Assistant tab --------------------------------------------------
   // Copilot / Gemini / Claude under one nav tab, picked from a sub-tab
   // strip. All three share one persistent session, so each service's
@@ -1267,7 +1305,7 @@ function createMainWindow() {
   assistantBarView.setVisible(false);
 
   // --- Services sub-tab strip -----------------------------------------
-  // The nav bar's Services tab owns Hunyuan3D / Mixamo / Poly Pizza; this
+  // The nav bar's Services tab owns Hunyuan3D / Mixamo / Poly Pizza / Meshy; this
   // strip picks between them, exactly like the Assistant strip does.
   servicesBarView = new WebContentsView({
     webPreferences: {
@@ -1315,6 +1353,7 @@ function createMainWindow() {
   win.contentView.addChildView(siteView);
   win.contentView.addChildView(mixamoView);
   win.contentView.addChildView(pizzaView);
+  win.contentView.addChildView(meshyView);
   win.contentView.addChildView(servicesBarView);
   win.contentView.addChildView(assistantBarView);
   for (const v of Object.values(assistantViews)) win.contentView.addChildView(v);
@@ -1331,6 +1370,7 @@ function createMainWindow() {
     siteView = null;
     mixamoView = null;
     pizzaView = null;
+    meshyView = null;
     assistantBarView = null;
     servicesBarView = null;
     for (const k of Object.keys(assistantViews)) delete assistantViews[k];
@@ -1390,7 +1430,7 @@ function layoutViews() {
   if (navView) navView.setBounds({ x: 0, y: 0, width: w, height: NAV_BAR_HEIGHT });
   sidebarView.setBounds({ x: 0, y: NAV_BAR_HEIGHT, width: sidebarW, height: below });
   // Both nav tabs add a sub-tab strip under the nav bar — Services picks
-  // Hunyuan3D / Mixamo / Poly Pizza, Assistant picks the chat service — so
+  // Hunyuan3D / Mixamo / Poly Pizza / Meshy, Assistant picks the chat service — so
   // the content rect shrinks to make room for whichever strip shows.
   const inAssistant = activeSite === 'assistant';
   const barH = inAssistant ? ASSISTANT_BAR_HEIGHT : SERVICES_BAR_HEIGHT;
@@ -1410,7 +1450,7 @@ function layoutViews() {
   // the active one shows.
   const content = { x: sidebarW, y: NAV_BAR_HEIGHT + barH, width: Math.max(0, w - sidebarW), height: Math.max(0, below - barH) };
   const active = activeView();
-  for (const v of [siteView, mixamoView, pizzaView, ...Object.values(assistantViews)]) {
+  for (const v of [siteView, mixamoView, pizzaView, meshyView, ...Object.values(assistantViews)]) {
     if (!v) continue;
     const isActive = v === active;
     try {

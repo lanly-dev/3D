@@ -1,5 +1,5 @@
 /* Services sub-tab strip — shown under the nav bar while the Services
-   site tab is active; picks between Hunyuan3D / Mixamo / Poly Pizza.
+   site tab is active; picks between Hunyuan3D / Mixamo / Poly Pizza / Meshy.
    Palette mirrors nav.css. */
 :root {
   --bg: #14161b;
