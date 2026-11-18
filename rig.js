@@ -295,7 +295,7 @@ function createRigEngine(opts) {
     }
   }
 
-  return { status, install, run, rootDir, repoDir, pythonExe, STEP_IDS };
+  return { status, install, run, isBusy: () => busy, rootDir, repoDir, pythonExe, STEP_IDS };
 }
 
 module.exports = { createRigEngine, RIG_EXTS, SIMPLIFY_COUNT };

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self';" />
+    <title>Settings</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <h1>Settings</h1>
+    <p class="sub">Machine setup for this app. Nothing here leaves the computer.</p>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Local rigging engine</h2>
+        <span id="status" class="pill">Checking…</span>
+      </div>
+      <p class="hint">
+        Powers <strong>Rig (local)</strong> in a model's right-click menu. The app
+        installs a portable Python, PyTorch (CUDA) and the RigAnything checkpoint
+        into its own data folder — a few GB, one time, resumable if interrupted.
+      </p>
+      <div id="missing" class="missing" hidden></div>
+      <div class="row">
+        <button id="install" class="btn primary">Install engine</button>
+        <button id="open-folder" class="btn">Open engine folder</button>
+      </div>
+      <div id="note" class="note" hidden></div>
+
+      <div class="log-head">
+        <h3>Setup log</h3>
+        <span id="log-path" class="path"></span>
+      </div>
+      <pre id="log" class="log">No setup log yet — install the engine to see progress here.</pre>
+    </section>
+
+    <script src="settings.js"></script>
+  </body>
+</html>

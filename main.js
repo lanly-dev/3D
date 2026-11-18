@@ -211,8 +211,9 @@ let meshyView = null;
 let navView = null;
 let assistantBarView = null;
 let servicesBarView = null;
+let settingsView = null;
 const assistantViews = {};
-/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza' | 'meshy' | 'assistant'. */
+/** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza' | 'meshy' | 'assistant' | 'settings'. */
 let activeSite = 'hunyuan';
 /** Which assistant shows under the Assistant tab (persisted choice). */
 let activeAssistant = 'copilot';
@@ -221,6 +222,7 @@ let activeService = 'hunyuan';
 
 /** The site view the nav bar currently drives (history + zoom). */
 function activeView() {
+  if (activeSite === 'settings') return settingsView || siteView;
   if (activeSite === 'assistant') return assistantViews[activeAssistant] || siteView;
   if (activeSite === 'mixamo' && mixamoView) return mixamoView;
   if (activeSite === 'polypizza' && pizzaView) return pizzaView;
@@ -232,6 +234,9 @@ function activeView() {
 function setActiveSite(name) {
   if (name === 'assistant') {
     activeSite = 'assistant';
+  } else if (name === 'settings') {
+    // App setup, not a browsable site — it keeps no session of its own.
+    activeSite = 'settings';
   } else if (SERVICE_SITES.includes(name)) {
     activeService = name;
     activeSite = name;
@@ -278,12 +283,50 @@ function pushServicesState() {
   servicesBarView.webContents.send('services:state', { active: activeService });
 }
 
+/** Last lines of a log file, for the Settings tab's setup log panel. */
+function tailLog(filePath, maxLines = 300) {
+  try {
+    const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
+    return lines.slice(-maxLines).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+/** Everything the Settings tab renders: rig-engine status + setup log. */
+function settingsState() {
+  let engine = null;
+  try {
+    engine = rigEngine();
+  } catch {
+    /* reported through the status below */
+  }
+  const status = engine
+    ? engine.status()
+    : { state: 'unsupported', reason: 'The rigging engine module failed to load.' };
+  const rootDir = engine ? engine.rootDir : '';
+  const logPath = rootDir ? path.join(rootDir, 'install.log') : '';
+  return {
+    status,
+    rootDir,
+    logPath,
+    log: logPath ? tailLog(logPath) : '',
+    installing: Boolean((engine && engine.isBusy && engine.isBusy()) || rigInstallRunning),
+  };
+}
+
+function pushSettingsState() {
+  if (!settingsView || settingsView.webContents.isDestroyed()) return;
+  settingsView.webContents.send('settings:state', settingsState());
+}
+
 /** Test hook: the Assistant tab's live geometry and visibility. */
 function assistantViewState() {
   const info = (v) => (v ? { visible: v.getVisible(), bounds: v.getBounds(), url: v.webContents.getURL() } : null);
   const views = {};
   for (const [name, v] of Object.entries(assistantViews)) views[name] = info(v);
-  return { activeSite, activeService, activeAssistant, bar: info(assistantBarView), servicesBar: info(servicesBarView), views };
+  return { activeSite, activeService, activeAssistant, bar: info(assistantBarView), servicesBar: info(servicesBarView), settings: info(settingsView), views };
 }
 const viewerWindows = new Set();
 let sidebarVisible = true;
@@ -1318,6 +1361,22 @@ function createMainWindow() {
   servicesBarView.webContents.loadFile(path.join(__dirname, 'services-bar.html'));
   servicesBarView.webContents.on('did-finish-load', pushServicesState);
   servicesBarView.setVisible(false);
+
+  // --- Settings tab -----------------------------------------------------
+  // A plain local page in the content area (no site session, no sub-tab
+  // strip): app setup, currently the local rigging engine's status and its
+  // install log. Hidden until the nav bar's Settings tab is picked.
+  settingsView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  settingsView.webContents.loadFile(path.join(__dirname, 'settings.html'));
+  settingsView.webContents.on('did-finish-load', pushSettingsState);
+  settingsView.setVisible(false);
   for (const [name, def] of Object.entries(ASSISTANTS)) {
     const v = new WebContentsView({
       webPreferences: {
@@ -1355,6 +1414,7 @@ function createMainWindow() {
   win.contentView.addChildView(pizzaView);
   win.contentView.addChildView(meshyView);
   win.contentView.addChildView(servicesBarView);
+  win.contentView.addChildView(settingsView);
   win.contentView.addChildView(assistantBarView);
   for (const v of Object.values(assistantViews)) win.contentView.addChildView(v);
 
@@ -1373,6 +1433,7 @@ function createMainWindow() {
     meshyView = null;
     assistantBarView = null;
     servicesBarView = null;
+    settingsView = null;
     for (const k of Object.keys(assistantViews)) delete assistantViews[k];
   });
 
@@ -1429,11 +1490,13 @@ function layoutViews() {
   const below = Math.max(0, h - NAV_BAR_HEIGHT);
   if (navView) navView.setBounds({ x: 0, y: 0, width: w, height: NAV_BAR_HEIGHT });
   sidebarView.setBounds({ x: 0, y: NAV_BAR_HEIGHT, width: sidebarW, height: below });
-  // Both nav tabs add a sub-tab strip under the nav bar — Services picks
-  // Hunyuan3D / Mixamo / Poly Pizza / Meshy, Assistant picks the chat service — so
-  // the content rect shrinks to make room for whichever strip shows.
+  // Both site tabs add a sub-tab strip under the nav bar — Services picks
+  // Hunyuan3D / Mixamo / Poly Pizza / Meshy, Assistant picks the chat
+  // service — so the content rect shrinks to make room for whichever strip
+  // shows. Settings has no strip and takes the whole content rect.
   const inAssistant = activeSite === 'assistant';
-  const barH = inAssistant ? ASSISTANT_BAR_HEIGHT : SERVICES_BAR_HEIGHT;
+  const inSettings = activeSite === 'settings';
+  const barH = inAssistant ? ASSISTANT_BAR_HEIGHT : inSettings ? 0 : SERVICES_BAR_HEIGHT;
   const barWidth = Math.max(0, w - sidebarW);
   const placeBar = (bar, show, height) => {
     if (!bar) return;
@@ -1445,12 +1508,12 @@ function layoutViews() {
     }
   };
   placeBar(assistantBarView, inAssistant, ASSISTANT_BAR_HEIGHT);
-  placeBar(servicesBarView, !inAssistant, SERVICES_BAR_HEIGHT);
+  placeBar(servicesBarView, !inAssistant && !inSettings, SERVICES_BAR_HEIGHT);
   // The site tabs and assistant views share the content rect; only
   // the active one shows.
   const content = { x: sidebarW, y: NAV_BAR_HEIGHT + barH, width: Math.max(0, w - sidebarW), height: Math.max(0, below - barH) };
   const active = activeView();
-  for (const v of [siteView, mixamoView, pizzaView, meshyView, ...Object.values(assistantViews)]) {
+  for (const v of [siteView, mixamoView, pizzaView, meshyView, settingsView, ...Object.values(assistantViews)]) {
     if (!v) continue;
     const isActive = v === active;
     try {
@@ -1493,14 +1556,18 @@ function navGo(wc, dir) {
 /** Enable/disable the nav bar arrows and set its zoom readout. */
 function pushNavState() {
   if (!navView || navView.webContents.isDestroyed() || !activeView()) return;
-  const zoom = currentZoom();
+  // Settings is app chrome, not a browsable site: its history arrows and
+  // zoom controls stay inert there.
+  const onSettings = activeSite === 'settings';
+  const wc = activeView().webContents;
+  const zoom = onSettings ? 1 : currentZoom();
   navView.webContents.send('nav:state', {
     site: activeSite,
-    canGoBack: navCan(activeView().webContents, 'back'),
-    canGoForward: navCan(activeView().webContents, 'forward'),
+    canGoBack: !onSettings && navCan(wc, 'back'),
+    canGoForward: !onSettings && navCan(wc, 'forward'),
     zoomPct: Math.round(zoom * 100),
-    canZoomIn: zoom < ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001,
-    canZoomOut: zoom > ZOOM_STEPS[0] + 0.001,
+    canZoomIn: !onSettings && zoom < ZOOM_STEPS[ZOOM_STEPS.length - 1] - 0.001,
+    canZoomOut: !onSettings && zoom > ZOOM_STEPS[0] + 0.001,
   });
 }
 
@@ -1517,7 +1584,7 @@ function currentZoom() {
 /** Set the site zoom, remember it for next launch, refresh the nav bar. */
 function applyZoom(factor) {
   const view = activeView();
-  if (!view) return;
+  if (!view || activeSite === 'settings') return;
   const f = Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], Math.max(ZOOM_STEPS[0], factor));
   try {
     view.webContents.setZoomFactor(f);
@@ -1936,6 +2003,8 @@ async function exportForMixamo(filePath) {
 
 // --- Local rigging engine (RigAnything, app-managed) -----------------
 let rigEngineInstance = null;
+/** True while a Settings-tab install is running (the engine has its own flag). */
+let rigInstallRunning = false;
 function rigEngine() {
   if (!rigEngineInstance) {
     rigEngineInstance = rig.createRigEngine({
@@ -2296,6 +2365,40 @@ function registerIpc() {
   ipcMain.on('nav:switchSite', (_e, name) => setActiveSite(name));
   ipcMain.on('assistant:set', (_e, name) => setActiveAssistant(name));
   ipcMain.on('services:set', (_e, name) => setActiveService(name));
+
+  // Settings tab: the local rigging engine's status, setup log and install.
+  ipcMain.handle('settings:state', () => settingsState());
+  ipcMain.handle('settings:install', async () => {
+    if (rigInstallRunning) return { ok: false, message: 'An install is already running.' };
+    const engine = rigEngine();
+    const st = engine.status();
+    if (st.state === 'unsupported') return { ok: false, message: st.reason };
+    if (st.state === 'ready') return { ok: true, message: 'Rigging engine is already installed.' };
+    rigInstallRunning = true;
+    pushSettingsState();
+    try {
+      const res = await engine.install((label) => {
+        pushSidebarStatus(label);
+        pushSettingsState();
+      });
+      return res;
+    } catch (err) {
+      return { ok: false, message: String(err && err.message ? err.message : err) };
+    } finally {
+      rigInstallRunning = false;
+      pushSettingsState();
+    }
+  });
+  ipcMain.handle('settings:open-root', async () => {
+    try {
+      const dir = rigEngine().rootDir;
+      fs.mkdirSync(dir, { recursive: true });
+      await shell.openPath(dir);
+      return true;
+    } catch {
+      return false;
+    }
+  });
 
   ipcMain.handle('assets:list', (_e, workspaceId) => {
     const list = assets.list(workspaceId || null);

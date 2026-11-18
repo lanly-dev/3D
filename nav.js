@@ -19,17 +19,21 @@ zoomResetBtn.addEventListener('click', () => bridge.zoomReset());
 
 const tabServices = document.getElementById('tab-services');
 const tabAssistant = document.getElementById('tab-assistant');
+const tabSettings = document.getElementById('tab-settings');
 tabServices.addEventListener('click', () => bridge.switchSite('services'));
 tabAssistant.addEventListener('click', () => bridge.switchSite('assistant'));
+tabSettings.addEventListener('click', () => bridge.switchSite('settings'));
 
 backBtn.disabled = true;
 forwardBtn.disabled = true;
 
 bridge.onState((state) => {
   if (state.site) {
-    // The Services tab owns the four 3D sites; Assistant is its own tab.
-    tabServices.classList.toggle('active', state.site !== 'assistant');
+    // The Services tab owns the four 3D sites; Assistant and Settings are
+    // tabs of their own.
+    tabServices.classList.toggle('active', state.site !== 'assistant' && state.site !== 'settings');
     tabAssistant.classList.toggle('active', state.site === 'assistant');
+    tabSettings.classList.toggle('active', state.site === 'settings');
   }
   backBtn.disabled = !state.canGoBack;
   forwardBtn.disabled = !state.canGoForward;
