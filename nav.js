@@ -17,13 +17,9 @@ zoomOutBtn.addEventListener('click', () => bridge.zoomOut());
 zoomInBtn.addEventListener('click', () => bridge.zoomIn());
 zoomResetBtn.addEventListener('click', () => bridge.zoomReset());
 
-const tabHunyuan = document.getElementById('tab-hunyuan');
-const tabMixamo = document.getElementById('tab-mixamo');
-const tabPolyPizza = document.getElementById('tab-polypizza');
+const tabServices = document.getElementById('tab-services');
 const tabAssistant = document.getElementById('tab-assistant');
-tabHunyuan.addEventListener('click', () => bridge.switchSite('hunyuan'));
-tabMixamo.addEventListener('click', () => bridge.switchSite('mixamo'));
-tabPolyPizza.addEventListener('click', () => bridge.switchSite('polypizza'));
+tabServices.addEventListener('click', () => bridge.switchSite('services'));
 tabAssistant.addEventListener('click', () => bridge.switchSite('assistant'));
 
 backBtn.disabled = true;
@@ -31,9 +27,8 @@ forwardBtn.disabled = true;
 
 bridge.onState((state) => {
   if (state.site) {
-    tabHunyuan.classList.toggle('active', state.site === 'hunyuan');
-    tabMixamo.classList.toggle('active', state.site === 'mixamo');
-    tabPolyPizza.classList.toggle('active', state.site === 'polypizza');
+    // The Services tab owns the three 3D sites; Assistant is its own tab.
+    tabServices.classList.toggle('active', state.site !== 'assistant');
     tabAssistant.classList.toggle('active', state.site === 'assistant');
   }
   backBtn.disabled = !state.canGoBack;

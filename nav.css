@@ -31,8 +31,8 @@ body {
 
 .nav-group { display: flex; align-items: center; gap: 4px; }
 
-/* Site tabs (Hunyuan3D / Mixamo) sit on the left; the rest stays right. */
-.site-tabs { margin-right: auto; }
+/* Site tabs (Services / Assistant) sit on the left; the rest stays right. */
+.site-tabs { margin-right: auto; gap: 8px; }
 
 .nav-sep { width: 1px; height: 18px; background: var(--line); margin: 0 7px; }
 

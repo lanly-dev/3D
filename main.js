@@ -164,6 +164,11 @@ const ASSISTANTS = {
   },
 };
 
+// The nav bar's Services tab hosts the three 3D sites under one tab,
+// picked from a sub-tab strip exactly like the Assistant tab's.
+const SERVICES_BAR_HEIGHT = 30;
+const SERVICE_SITES = ['hunyuan', 'mixamo', 'polypizza'];
+
 // Sidebar layout
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 520;
@@ -201,11 +206,14 @@ let mixamoView = null;
 let pizzaView = null;
 let navView = null;
 let assistantBarView = null;
+let servicesBarView = null;
 const assistantViews = {};
 /** Which site tab fills the content area: 'hunyuan' | 'mixamo' | 'polypizza' | 'assistant'. */
 let activeSite = 'hunyuan';
 /** Which assistant shows under the Assistant tab (persisted choice). */
 let activeAssistant = 'copilot';
+/** Which 3D site shows under the Services tab (persisted choice). */
+let activeService = 'hunyuan';
 
 /** The site view the nav bar currently drives (history + zoom). */
 function activeView() {
@@ -215,11 +223,21 @@ function activeView() {
   return siteView;
 }
 
-/** Switch the content area between the site tabs. */
+/** Switch the content area between the nav bar's two site tabs. */
 function setActiveSite(name) {
-  activeSite = ['mixamo', 'polypizza', 'assistant'].includes(name) ? name : 'hunyuan';
+  if (name === 'assistant') {
+    activeSite = 'assistant';
+  } else if (SERVICE_SITES.includes(name)) {
+    activeService = name;
+    activeSite = name;
+  } else {
+    // The Services tab carries no site of its own: it reopens whichever
+    // service was showing last.
+    activeSite = activeService;
+  }
   layoutViews();
   pushNavState();
+  pushServicesState();
 }
 
 /** Switch which assistant the Assistant tab shows; the choice sticks. */
@@ -238,12 +256,29 @@ function pushAssistantState() {
   assistantBarView.webContents.send('assistant:state', { active: activeAssistant });
 }
 
+/** Switch which 3D site the Services tab shows; the choice sticks. */
+function setActiveService(name) {
+  if (!SERVICE_SITES.includes(name)) return;
+  activeService = name;
+  activeSite = name;
+  settings.serviceTab = name;
+  saveSettings(settings);
+  layoutViews();
+  pushServicesState();
+  pushNavState();
+}
+
+function pushServicesState() {
+  if (!servicesBarView || servicesBarView.webContents.isDestroyed()) return;
+  servicesBarView.webContents.send('services:state', { active: activeService });
+}
+
 /** Test hook: the Assistant tab's live geometry and visibility. */
 function assistantViewState() {
   const info = (v) => (v ? { visible: v.getVisible(), bounds: v.getBounds(), url: v.webContents.getURL() } : null);
   const views = {};
   for (const [name, v] of Object.entries(assistantViews)) views[name] = info(v);
-  return { activeSite, activeAssistant, bar: info(assistantBarView), views };
+  return { activeSite, activeService, activeAssistant, bar: info(assistantBarView), servicesBar: info(servicesBarView), views };
 }
 const viewerWindows = new Set();
 let sidebarVisible = true;
@@ -1215,6 +1250,10 @@ function createMainWindow() {
   if (settings.assistantTab && ASSISTANTS[settings.assistantTab]) {
     activeAssistant = settings.assistantTab;
   }
+  if (SERVICE_SITES.includes(settings.serviceTab)) {
+    activeService = settings.serviceTab;
+    activeSite = settings.serviceTab;
+  }
   assistantBarView = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, 'assistant-bar-preload.js'),
@@ -1226,6 +1265,21 @@ function createMainWindow() {
   assistantBarView.webContents.loadFile(path.join(__dirname, 'assistant-bar.html'));
   assistantBarView.webContents.on('did-finish-load', pushAssistantState);
   assistantBarView.setVisible(false);
+
+  // --- Services sub-tab strip -----------------------------------------
+  // The nav bar's Services tab owns Hunyuan3D / Mixamo / Poly Pizza; this
+  // strip picks between them, exactly like the Assistant strip does.
+  servicesBarView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'services-bar-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  servicesBarView.webContents.loadFile(path.join(__dirname, 'services-bar.html'));
+  servicesBarView.webContents.on('did-finish-load', pushServicesState);
+  servicesBarView.setVisible(false);
   for (const [name, def] of Object.entries(ASSISTANTS)) {
     const v = new WebContentsView({
       webPreferences: {
@@ -1261,6 +1315,7 @@ function createMainWindow() {
   win.contentView.addChildView(siteView);
   win.contentView.addChildView(mixamoView);
   win.contentView.addChildView(pizzaView);
+  win.contentView.addChildView(servicesBarView);
   win.contentView.addChildView(assistantBarView);
   for (const v of Object.values(assistantViews)) win.contentView.addChildView(v);
 
@@ -1277,6 +1332,7 @@ function createMainWindow() {
     mixamoView = null;
     pizzaView = null;
     assistantBarView = null;
+    servicesBarView = null;
     for (const k of Object.keys(assistantViews)) delete assistantViews[k];
   });
 
@@ -1333,20 +1389,23 @@ function layoutViews() {
   const below = Math.max(0, h - NAV_BAR_HEIGHT);
   if (navView) navView.setBounds({ x: 0, y: 0, width: w, height: NAV_BAR_HEIGHT });
   sidebarView.setBounds({ x: 0, y: NAV_BAR_HEIGHT, width: sidebarW, height: below });
-  // The Assistant tab adds a sub-tab strip under the nav bar; the
-  // content rect shrinks to make room for it while it shows.
+  // Both nav tabs add a sub-tab strip under the nav bar — Services picks
+  // Hunyuan3D / Mixamo / Poly Pizza, Assistant picks the chat service — so
+  // the content rect shrinks to make room for whichever strip shows.
   const inAssistant = activeSite === 'assistant';
-  const barH = inAssistant ? ASSISTANT_BAR_HEIGHT : 0;
-  if (assistantBarView) {
+  const barH = inAssistant ? ASSISTANT_BAR_HEIGHT : SERVICES_BAR_HEIGHT;
+  const barWidth = Math.max(0, w - sidebarW);
+  const placeBar = (bar, show, height) => {
+    if (!bar) return;
     try {
-      assistantBarView.setVisible(inAssistant);
-      if (inAssistant) {
-        assistantBarView.setBounds({ x: sidebarW, y: NAV_BAR_HEIGHT, width: Math.max(0, w - sidebarW), height: ASSISTANT_BAR_HEIGHT });
-      }
+      bar.setVisible(show);
+      if (show) bar.setBounds({ x: sidebarW, y: NAV_BAR_HEIGHT, width: barWidth, height });
     } catch {
       /* view going away — ignore */
     }
-  }
+  };
+  placeBar(assistantBarView, inAssistant, ASSISTANT_BAR_HEIGHT);
+  placeBar(servicesBarView, !inAssistant, SERVICES_BAR_HEIGHT);
   // The site tabs and assistant views share the content rect; only
   // the active one shows.
   const content = { x: sidebarW, y: NAV_BAR_HEIGHT + barH, width: Math.max(0, w - sidebarW), height: Math.max(0, below - barH) };
@@ -2196,6 +2255,7 @@ function registerIpc() {
   ipcMain.on('nav:zoomReset', () => applyZoom(1));
   ipcMain.on('nav:switchSite', (_e, name) => setActiveSite(name));
   ipcMain.on('assistant:set', (_e, name) => setActiveAssistant(name));
+  ipcMain.on('services:set', (_e, name) => setActiveService(name));
 
   ipcMain.handle('assets:list', (_e, workspaceId) => {
     const list = assets.list(workspaceId || null);
