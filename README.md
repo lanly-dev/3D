@@ -1,7 +1,13 @@
 # 3D Kits
 
-A small desktop wrapper around the Hunyuan3D web app
-(`https://3d.hunyuan.tencent.com/`), with a local asset sidebar.
+A desktop workshop for AI-generated 3D, built around one flow:
+**image in → name the animations you want → a fully rigged, animated
+3D model out** — with the animation made custom for each model, never
+copied from a shared clip library.
+
+It wraps the Hunyuan3D web app (`https://3d.hunyuan.tencent.com/`) with
+a local asset sidebar. Generation (Hunyuan3D) and local AI rigging are
+in today; per-model animation is the stage being built next.
 
 ## What it does
 
@@ -36,6 +42,13 @@ A small desktop wrapper around the Hunyuan3D web app
   (moves it to the Recycle Bin, with
   confirmation), or **Remove from list**. **Toggle DevTools** (Navigate
   menu, Ctrl+Shift+I or F12) toggles DevTools on the focused view.
+- **Local AI rigging** — right-click a model → **Rig (local)** rigs a
+  fused, unrigged model on your own GPU: skeleton + skinning weights,
+  written as `<name>.rigged.glb` next to the original, plus a
+  `<name>.rig.npz` (joints + weights) for later pipeline stages. The
+  engine (RigAnything) is app-managed — the first click offers a
+  one-click install into the app's data folder; no terminal, and
+  nothing leaves your machine.
 - **3D viewer** — clicking a model opens it in an in-app viewer (Three.js)
   instead of the machine's default app: orbit / zoom / pan, texture
   on/off, wireframe, auto-rotate, grid, and camera reset. Supports GLB, GLTF, OBJ, STL, PLY

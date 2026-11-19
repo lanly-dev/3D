@@ -35,6 +35,8 @@ const SYNC_FILES = [
   'thumb.html', 'thumb.css', 'thumb.js', 'thumbs.js',
   'formats.html', 'formats.css',
   'assistant-bar.html', 'assistant-bar.css', 'assistant-bar.js', 'assistant-bar-preload.js',
+  'services-bar.html', 'services-bar.css', 'services-bar.js', 'services-bar-preload.js',
+  'settings.html', 'settings.css', 'settings.js', 'settings-preload.js',
 ];
 
 function gitPull(dir) {
