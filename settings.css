@@ -144,6 +144,7 @@ h1 {
 }
 
 .path {
+  min-width: 0;
   font-size: 11.5px;
   color: var(--fg-dim);
   overflow: hidden;
@@ -151,10 +152,18 @@ h1 {
   white-space: nowrap;
 }
 
+.log-head.divided {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.log-hint { margin: 0 0 6px; font-size: 12.5px; }
+
 .log {
   margin: 0;
   padding: 10px 12px;
-  height: 260px;
+  height: 220px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;

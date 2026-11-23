@@ -283,7 +283,48 @@ function pushServicesState() {
   servicesBarView.webContents.send('services:state', { active: activeService });
 }
 
-/** Last lines of a log file, for the Settings tab's setup log panel. */
+/**
+ * The app's own log (userData/app.log): startup, failed downloads, renderer
+ * crashes and failed page loads — the faults the UI has no way to show. Not a
+ * second activity feed: install progress is already in the engine's
+ * install.log and each rig run in its job's rig.log. Best-effort by design:
+ * logging never throws into its caller.
+ */
+function appLogPath() {
+  return path.join(app.getPath('userData'), 'app.log');
+}
+function appLog(line) {
+  try {
+    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    fs.appendFileSync(appLogPath(), `${stamp}  ${String(line).replace(/\s+$/, '')}\n`);
+  } catch { /* a log is never worth breaking the app over */ }
+}
+
+/**
+ * One trim per session, not a stat on every line: a session writes a handful
+ * of fault lines, so the bound only has to hold across launches.
+ */
+function trimAppLog() {
+  try {
+    const file = appLogPath();
+    if (fs.statSync(file).size < 512 * 1024) return;
+    const keep = fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(-2000).join('\n');
+    fs.writeFileSync(file, `${keep}\n`);
+  } catch { /* no log yet */ }
+}
+
+/** Per-webContents diagnostics that end up in the Settings app log. */
+function watchContents(contents) {
+  contents.on('render-process-gone', (_e, details) => {
+    appLog(`renderer gone (${details.reason}, exit ${details.exitCode}) — ${contents.getURL() || 'about:blank'}`);
+  });
+  contents.on('did-fail-load', (_e, code, desc, failedUrl, isMainFrame) => {
+    // -3 is an aborted load (a redirect or a navigation away), not a failure.
+    if (isMainFrame && code !== -3) appLog(`load failed (${code} ${desc}) — ${failedUrl}`);
+  });
+}
+
+/** Last lines of a log file, for the Settings tab's log panels. */
 function tailLog(filePath, maxLines = 300) {
   try {
     const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
@@ -312,6 +353,8 @@ function settingsState() {
     rootDir,
     logPath,
     log: logPath ? tailLog(logPath) : '',
+    appLogPath: appLogPath(),
+    appLog: tailLog(appLogPath(), 200),
     installing: Boolean((engine && engine.isBusy && engine.isBusy()) || rigInstallRunning),
   };
 }
@@ -1091,6 +1134,7 @@ function attachDownloadHandler(ses, label, fallbackName) {
     }
     item.setSavePath(target);
     item.once('done', (_e, state) => {
+      if (state !== 'completed') appLog(`download ${state} (${label}) — ${path.basename(target)}`);
       if (state === 'completed') {
         lastDownloadPath = target;
         // Register the download as a managed asset in its workspace.
@@ -2383,7 +2427,8 @@ function registerIpc() {
       });
       return res;
     } catch (err) {
-      return { ok: false, message: String(err && err.message ? err.message : err) };
+      const message = String(err && err.message ? err.message : err);
+      return { ok: false, message };
     } finally {
       rigInstallRunning = false;
       pushSettingsState();
@@ -2772,6 +2817,8 @@ function isEntryPoint() {
 
 if (isEntryPoint()) {
   app.whenReady().then(() => {
+    trimAppLog();
+    appLog(`started — ${APP_TITLE} ${app.getVersion()} on ${process.platform}, userData ${app.getPath('userData')}`);
     registerIpc();
     loadLayout();
     // Every app needs at least one workspace — the first one points at Downloads.
@@ -2779,6 +2826,7 @@ if (isEntryPoint()) {
 
     // Every new webContents (popups included) gets the same window.open policy.
     app.on('web-contents-created', (_event, contents) => {
+      watchContents(contents);
       if (contents.getType() === 'window') {
         applyWindowOpenHandler(contents);
         if (settings.translateToEnglish) {

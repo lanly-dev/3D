@@ -11,6 +11,8 @@ const openBtn = document.getElementById('open-folder');
 const noteEl = document.getElementById('note');
 const logEl = document.getElementById('log');
 const logPathEl = document.getElementById('log-path');
+const appLogEl = document.getElementById('app-log');
+const appLogPathEl = document.getElementById('app-log-path');
 
 const STATUS_LABEL = {
   ready: 'Installed',
@@ -19,8 +21,17 @@ const STATUS_LABEL = {
   unsupported: 'Unavailable',
 };
 
-let lastLog = null;
 let latest = null;
+
+// Each log pane only repaints when its text changed, and only follows the
+// tail if it was already at the bottom (so scrolling back to read is stable).
+function paintLog(el, text, placeholder) {
+  const shown = text && text.trim() ? text : placeholder;
+  if (shown === el.textContent) return;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  el.textContent = shown;
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
 
 function render(state) {
   if (!state) return;
@@ -50,15 +61,10 @@ function render(state) {
     : st.state === 'partial' ? 'Resume install' : 'Install engine';
 
   logPathEl.textContent = state.logPath || '';
-  const text = state.log && state.log.trim()
-    ? state.log
-    : 'No setup log yet — install the engine to see progress here.';
-  if (text !== lastLog) {
-    const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 24;
-    logEl.textContent = text;
-    lastLog = text;
-    if (atBottom) logEl.scrollTop = logEl.scrollHeight;
-  }
+  paintLog(logEl, state.log, 'No setup log yet — install the engine to see progress here.');
+
+  appLogPathEl.textContent = state.appLogPath || '';
+  paintLog(appLogEl, state.appLog, 'Nothing logged yet.');
 }
 
 async function refresh() {
